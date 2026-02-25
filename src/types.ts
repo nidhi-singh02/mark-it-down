@@ -41,4 +41,6 @@ export interface ConvertResult {
   markdown: string;
   /** Metadata extracted from the page. */
   metadata: PageMetadata;
+  /** Non-fatal warnings generated during conversion. */
+  warnings: string[];
 }

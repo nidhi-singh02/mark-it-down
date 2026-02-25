@@ -1,4 +1,4 @@
-# md-tool
+# markitdown
 
 Convert any web page to clean Markdown. Built for developers and LLM pipelines.
 
@@ -12,13 +12,13 @@ npm install
 npm run build
 
 # Run
-node dist/bin/md-tool.js https://example.com
+node dist/bin/markitdown.js https://example.com
 ```
 
 ## Usage
 
 ```bash
-md-tool <url> [options]
+markitdown <url> [options]
 ```
 
 ### Options
@@ -36,22 +36,22 @@ md-tool <url> [options]
 
 ```bash
 # Convert a page and print to terminal
-node dist/bin/md-tool.js https://en.wikipedia.org/wiki/Markdown
+markitdown https://en.wikipedia.org/wiki/Markdown
 
 # Save to a file
-node dist/bin/md-tool.js https://example.com -o page.md
+markitdown https://example.com -o page.md
 
 # Include title, author, date as YAML frontmatter
-node dist/bin/md-tool.js https://example.com -f
+markitdown https://example.com -f
 
 # Strip all images
-node dist/bin/md-tool.js https://example.com --no-images
+markitdown https://example.com --no-images
 
 # Convert raw HTML without content extraction
-node dist/bin/md-tool.js https://example.com -r
+markitdown https://example.com -r
 
 # Pipe to another tool (only markdown goes to stdout)
-node dist/bin/md-tool.js https://example.com | head -20
+markitdown https://example.com | head -20
 ```
 
 ### SPA / JavaScript-Rendered Pages
@@ -64,19 +64,19 @@ npm install playwright
 npx playwright install chromium
 
 # Then use the --browser flag
-node dist/bin/md-tool.js https://react.dev --browser
+markitdown https://react.dev --browser
 ```
 
 Playwright is an optional dependency (~100MB) and is only needed for JS-rendered pages.
 
 ## Global Install
 
-To use `md-tool` as a command anywhere:
+To use `markitdown` as a command anywhere:
 
 ```bash
 npm run build
 npm link
-md-tool https://example.com
+markitdown https://example.com
 ```
 
 ## Programmatic API
@@ -84,7 +84,7 @@ md-tool https://example.com
 The converter is also usable as a library:
 
 ```typescript
-import { convert } from "md-tool";
+import { convert } from "markitdown";
 
 const { markdown, metadata } = await convert("https://example.com", {
   frontmatter: true,
@@ -98,7 +98,7 @@ console.log(markdown);
 Individual modules are also exported:
 
 ```typescript
-import { fetchPage, extractContent, htmlToMarkdown } from "md-tool";
+import { fetchPage, extractContent, htmlToMarkdown } from "markitdown";
 ```
 
 ## How It Works

@@ -86,6 +86,11 @@ export function createProgram(): Command {
           timeout: Number(opts.timeout),
         });
 
+        // Print any warnings from the library to stderr
+        for (const warning of result.warnings) {
+          process.stderr.write(`Warning: ${warning}\n`);
+        }
+
         if (opts.output) {
           const safePath = await validateOutputPath(opts.output as string);
           await writeFile(safePath, result.markdown, "utf-8");

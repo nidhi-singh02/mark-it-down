@@ -11,7 +11,7 @@ export default defineConfig([
     clean: true,
   },
   {
-    entry: { "bin/md-tool": "bin/md-tool.ts" },
+    entry: { "bin/markitdown": "bin/markitdown.ts" },
     format: ["esm"],
     target: "node18",
     splitting: false,

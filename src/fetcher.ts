@@ -61,7 +61,8 @@ function expandIPv6(ip: string): string {
   return groups.map((g) => g.toLowerCase()).join(":");
 }
 
-function normalizeIP(hostname: string): string | null {
+/** @internal Exported for testing — will move to ssrf.ts */
+export function normalizeIP(hostname: string): string | null {
   const bare = hostname.replace(/^\[|\]$/g, "");
 
   if (isIP(bare) === 4) return bare;
@@ -126,7 +127,8 @@ function normalizeIP(hostname: string): string | null {
   return null;
 }
 
-function isPrivateIP(ip: string): boolean {
+/** @internal Exported for testing — will move to ssrf.ts */
+export function isPrivateIP(ip: string): boolean {
   if (ip.startsWith("127.")) return true;
   if (ip.startsWith("10.")) return true;
   if (ip.startsWith("0.")) return true;
@@ -282,15 +284,25 @@ function validateContentType(headers: Record<string, string | string[] | undefin
  * Create a pinned DNS lookup function that always returns the pre-resolved IP.
  * This prevents DNS rebinding: the TCP connection is forced to the validated IP
  * while TLS SNI and certificate validation use the original hostname.
+ *
+ * Handles both callback signatures:
+ * - all:false (default on Node <20): callback(null, address, family)
+ * - all:true  (Node 20+ autoSelectFamily): callback(null, [{address, family}])
  */
 function createPinnedLookup(resolvedIP: string) {
   const family = resolvedIP.includes(":") ? 6 : 4;
   return (
     _hostname: string,
-    _options: unknown,
-    callback: (err: NodeJS.ErrnoException | null, address: string, family: number) => void
+    options: { all?: boolean } | number | undefined,
+    callback: Function
   ) => {
-    callback(null, resolvedIP, family);
+    // options can be {all: true} (object), a family number, or undefined
+    const opts = (typeof options === "object" && options !== null) ? options : {};
+    if (opts.all) {
+      callback(null, [{ address: resolvedIP, family }]);
+    } else {
+      callback(null, resolvedIP, family);
+    }
   };
 }
 
@@ -299,11 +311,21 @@ function createPinnedLookup(resolvedIP: string) {
  * with a pinned DNS lookup to prevent DNS rebinding.
  * Returns the response status, headers, and body.
  */
+interface PinnedResponse {
+  status: number;
+  headers: Record<string, string | string[] | undefined>;
+  /** Response body as UTF-8 string (for HTML processing). */
+  body: string;
+  /** Response body as raw Buffer (for binary-safe forwarding). */
+  bodyBuffer: Buffer;
+  responseUrl: string;
+}
+
 function pinnedRequest(
   url: string,
   resolvedIP: string,
   timeout: number
-): Promise<{ status: number; headers: Record<string, string | string[] | undefined>; body: string; responseUrl: string }> {
+): Promise<PinnedResponse> {
   return new Promise((resolve, reject) => {
     const parsed = new URL(url);
     const isHttps = parsed.protocol === "https:";
@@ -342,11 +364,12 @@ function pinnedRequest(
         });
 
         res.on("end", () => {
-          const body = Buffer.concat(chunks).toString("utf-8");
+          const bodyBuffer = Buffer.concat(chunks);
           resolve({
             status: res.statusCode || 0,
             headers: res.headers as Record<string, string | string[] | undefined>,
-            body,
+            body: bodyBuffer.toString("utf-8"),
+            bodyBuffer,
             responseUrl: url,
           });
         });
@@ -470,12 +493,23 @@ export async function fetchWithBrowser(
     });
     const page = await context.newPage();
 
-    // Intercept all HTTP requests to validate sub-resources against SSRF
+    // Intercept all sub-resource requests and fetch them via our pinned HTTP
+    // client to prevent DNS rebinding on sub-resource hostnames. The initial
+    // page load is pinned via --host-resolver-rules, but sub-resources to
+    // different hostnames need per-request DNS pinning.
     await context.route("**/*", async (route: any) => {
       const requestUrl = route.request().url();
       try {
-        await validateUrl(requestUrl);
-        await route.continue();
+        const subIP = await validateUrl(requestUrl);
+        // Fetch the resource ourselves with DNS pinning, then fulfill
+        // the Playwright request with our response. This prevents Chromium
+        // from doing a second (potentially rebinding) DNS resolution.
+        const subResponse = await pinnedRequest(requestUrl, subIP, safTimeout);
+        await route.fulfill({
+          status: subResponse.status,
+          headers: subResponse.headers as Record<string, string>,
+          body: subResponse.bodyBuffer,
+        });
       } catch {
         await route.abort("blockedbyclient");
       }

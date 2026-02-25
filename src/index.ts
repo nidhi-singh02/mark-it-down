@@ -83,6 +83,8 @@ export async function convert(
     lang: null,
   };
 
+  const warnings: string[] = [];
+
   if (opts.raw) {
     contentHtml = html;
   } else {
@@ -90,10 +92,10 @@ export async function convert(
 
     if (!extracted) {
       if (!opts.browser && !isProbablyReaderable(html)) {
-        process.stderr.write(
-          "Warning: Content extraction returned empty results.\n" +
-            "This page may require JavaScript rendering.\n" +
-            "Try re-running with --browser flag.\n\n"
+        warnings.push(
+          "Content extraction returned empty results. " +
+            "This page may require JavaScript rendering. " +
+            "Try re-running with --browser flag."
         );
       }
       contentHtml = html;
@@ -115,5 +117,5 @@ export async function convert(
     markdown = fm + "\n\n" + markdown;
   }
 
-  return { markdown, metadata };
+  return { markdown, metadata, warnings };
 }
