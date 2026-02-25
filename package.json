@@ -1,0 +1,64 @@
+{
+  "name": "markitdown",
+  "version": "0.1.0",
+  "description": "Convert any web page to clean Markdown. Built for developers and LLM pipelines.",
+  "author": "Nidhi Singh",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nidhisingh/mark-it-down.git"
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "markitdown": "./dist/bin/markitdown.js"
+  },
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "markdown",
+    "html",
+    "converter",
+    "web",
+    "cli",
+    "llm",
+    "readability"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "@joplin/turndown-plugin-gfm": "^1.0.64",
+    "@mozilla/readability": "^0.6.0",
+    "commander": "^14.0.0",
+    "linkedom": "^0.18.0",
+    "turndown": "^7.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/turndown": "^5.0.5",
+    "tsup": "^8.5.0",
+    "typescript": "^5.7.0"
+  },
+  "peerDependencies": {
+    "playwright": ">=1.40.0"
+  },
+  "peerDependenciesMeta": {
+    "playwright": {
+      "optional": true
+    }
+  }
+}
