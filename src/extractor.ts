@@ -43,7 +43,20 @@ export function extractContent(
   }
 
   if (!article || !article.content) {
-    return null;
+    return fallbackExtract(html);
+  }
+
+  // Detect when Readability drops significant content (e.g. code blocks on
+  // documentation sites). Compare <pre> counts as a proxy: if the raw HTML
+  // has <pre> blocks but Readability's output has none, fall back to
+  // extracting from <article> or <main> which preserves them.
+  // Note: Readability mutates the DOM, so fallback must re-parse the HTML.
+  const rawPreCount = (html.match(/<pre[\s>]/gi) || []).length;
+  const extractedPreCount = (article.content.match(/<pre[\s>]/gi) || []).length;
+
+  if (rawPreCount > 0 && extractedPreCount === 0) {
+    const fallback = fallbackExtract(html);
+    if (fallback) return fallback;
   }
 
   const metadata: PageMetadata = {
@@ -56,6 +69,37 @@ export function extractContent(
   };
 
   return { content: article.content, metadata };
+}
+
+/**
+ * Fallback extraction: re-parse the HTML and use <article> or <main> element
+ * directly when Readability's heuristics strip too much content (common on
+ * docs sites). Re-parses because Readability mutates the original DOM.
+ */
+function fallbackExtract(html: string): ExtractResult | null {
+  let document: ReturnType<typeof parseHTML>["document"];
+  try {
+    ({ document } = parseHTML(html));
+  } catch {
+    return null;
+  }
+
+  const el = document.querySelector("article") || document.querySelector("main");
+  if (!el || !el.innerHTML) return null;
+
+  const title = document.querySelector("title")?.textContent || null;
+
+  return {
+    content: el.innerHTML,
+    metadata: {
+      title,
+      byline: null,
+      excerpt: null,
+      siteName: null,
+      publishedTime: null,
+      lang: document.documentElement?.getAttribute("lang") || null,
+    },
+  };
 }
 
 /**

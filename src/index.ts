@@ -1,5 +1,6 @@
 import { fetchPage } from "./fetcher.js";
 import { extractContent, isProbablyReaderable } from "./extractor.js";
+import { extractMdx } from "./mdx-extractor.js";
 import { htmlToMarkdown } from "./converter.js";
 import { ValidationError } from "./errors.js";
 import type { ConvertOptions, ConvertResult, PageMetadata } from "./types.js";
@@ -7,6 +8,7 @@ import type { ConvertOptions, ConvertResult, PageMetadata } from "./types.js";
 export type { ConvertOptions, ConvertResult, PageMetadata };
 export { fetchPage, validateUrl } from "./fetcher.js";
 export { extractContent } from "./extractor.js";
+export { extractMdx } from "./mdx-extractor.js";
 export { htmlToMarkdown } from "./converter.js";
 export {
   MarkitdownError,
@@ -110,8 +112,6 @@ export async function convert(
     timeout: opts.timeout,
   });
 
-  // Extract or use raw HTML
-  let contentHtml: string;
   let metadata: PageMetadata = {
     title: null,
     byline: null,
@@ -122,32 +122,48 @@ export async function convert(
   };
 
   const warnings: string[] = [];
+  let markdown: string;
 
-  if (opts.raw) {
-    contentHtml = html;
+  // Try to extract raw MDX from Next.js RSC payloads first — this gives
+  // complete content including collapsed accordions, tabs, etc.
+  const mdxResult = !opts.raw ? extractMdx(html, finalUrl) : null;
+
+  if (mdxResult) {
+    markdown = mdxResult.markdown;
+    metadata = mdxResult.metadata;
+
+    if (opts.noImages) {
+      markdown = markdown.replace(/!\[[^\]]*\]\([^)]*\)\s*/g, "");
+    }
   } else {
-    const extracted = extractContent(html, finalUrl);
+    // Standard path: extract content from HTML, then convert to markdown
+    let contentHtml: string;
 
-    if (!extracted) {
-      if (!opts.browser && !isProbablyReaderable(html)) {
-        warnings.push(
-          "Content extraction returned empty results. " +
-            "This page may require JavaScript rendering. " +
-            "Try re-running with --browser flag."
-        );
-      }
+    if (opts.raw) {
       contentHtml = html;
     } else {
-      contentHtml = extracted.content;
-      metadata = extracted.metadata;
-    }
-  }
+      const extracted = extractContent(html, finalUrl);
 
-  // Convert to Markdown
-  let markdown = htmlToMarkdown(contentHtml, {
-    baseUrl: finalUrl,
-    stripImages: opts.noImages,
-  });
+      if (!extracted) {
+        if (!opts.browser && !isProbablyReaderable(html)) {
+          warnings.push(
+            "Content extraction returned empty results. " +
+              "This page may require JavaScript rendering. " +
+              "Try re-running with --browser flag."
+          );
+        }
+        contentHtml = html;
+      } else {
+        contentHtml = extracted.content;
+        metadata = extracted.metadata;
+      }
+    }
+
+    markdown = htmlToMarkdown(contentHtml, {
+      baseUrl: finalUrl,
+      stripImages: opts.noImages,
+    });
+  }
 
   // Prepend frontmatter if requested
   if (opts.frontmatter) {

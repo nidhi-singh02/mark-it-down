@@ -333,7 +333,7 @@ export async function fetchWithBrowser(
   const safTimeout = clampTimeout(timeout);
 
   // Playwright is optional — define minimal structural types for the APIs we use
-  type PwRoute = { request(): { url(): string }; fulfill(opts: Record<string, unknown>): Promise<void>; abort(reason: string): Promise<void> };
+  type PwRoute = { request(): { url(): string }; fulfill(opts: Record<string, unknown>): Promise<void>; abort(reason: string): Promise<void>; continue(): Promise<void> };
   type PwPage = { goto(url: string, opts: Record<string, unknown>): Promise<void>; waitForTimeout(ms: number): Promise<void>; content(): Promise<string>; url(): string };
   type PwContext = { newPage(): Promise<PwPage>; route(pattern: string, handler: (route: PwRoute) => Promise<void>): Promise<void> };
   type PwBrowser = { newContext(opts: Record<string, unknown>): Promise<PwContext>; close(): Promise<void> };
@@ -378,35 +378,31 @@ export async function fetchWithBrowser(
     });
     const page = await context.newPage();
 
-    // Intercept all sub-resource requests and fetch them via our pinned HTTP
-    // client to prevent DNS rebinding on sub-resource hostnames. The initial
-    // page load is pinned via --host-resolver-rules, but sub-resources to
-    // different hostnames need per-request DNS pinning.
+    // Intercept sub-resource requests for SSRF validation. The initial page
+    // load is pinned via --host-resolver-rules. Sub-resources are validated
+    // (URL + DNS check) but fetched natively by Chromium so HTTP/2, cookies,
+    // compression, and redirect handling all work correctly for SPAs.
     await context.route("**/*", async (route) => {
       const requestUrl = route.request().url();
       try {
-        const subIP = await validateUrl(requestUrl);
-        // Fetch the resource ourselves with DNS pinning, then fulfill
-        // the Playwright request with our response. This prevents Chromium
-        // from doing a second (potentially rebinding) DNS resolution.
-        const subResponse = await pinnedRequest(requestUrl, subIP, safTimeout);
-        await route.fulfill({
-          status: subResponse.status,
-          headers: subResponse.headers,
-          body: subResponse.bodyBuffer,
-        });
+        const parsed = new URL(requestUrl);
+        // Only validate http/https — skip data:, blob:, chrome: etc.
+        if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+          await validateUrl(requestUrl);
+        }
+        await route.continue();
       } catch {
         await route.abort("blockedbyclient");
       }
     });
 
     await page.goto(url, {
-      waitUntil: "networkidle",
+      waitUntil: "load",
       timeout: safTimeout,
     });
 
-    // Extra wait for late JS rendering
-    await page.waitForTimeout(1000);
+    // Wait for SPA frameworks to hydrate and render content
+    await page.waitForTimeout(3000);
 
     const html = await page.content();
 

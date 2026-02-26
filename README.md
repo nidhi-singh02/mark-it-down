@@ -5,14 +5,21 @@ Convert any web page to clean Markdown. Built for developers and LLM pipelines.
 ## Quick Start
 
 ```bash
-# Install dependencies
-npm install
+# No install needed — run directly with npx
+npx web-to-markdown https://example.com
 
-# Build
-npm run build
+# Save to a file
+npx web-to-markdown https://example.com -o page.md
+```
 
-# Run
-node dist/bin/web-to-markdown.js https://example.com
+## Install
+
+```bash
+# Global install (use from anywhere)
+npm install -g web-to-markdown
+
+# Project dependency (for programmatic API)
+npm install web-to-markdown
 ```
 
 ## Usage
@@ -68,16 +75,6 @@ web-to-markdown https://react.dev --browser
 ```
 
 Playwright is an optional dependency (~100MB) and is only needed for JS-rendered pages.
-
-## Global Install
-
-To use `web-to-markdown` as a command anywhere:
-
-```bash
-npm run build
-npm link
-web-to-markdown https://example.com
-```
 
 ## Programmatic API
 

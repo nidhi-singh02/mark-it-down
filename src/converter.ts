@@ -63,26 +63,52 @@ function createTurndownService(options: ConverterOptions): TurndownService {
 
   turndown.use(gfm);
 
-  // Code blocks with language detection
-  turndown.addRule("fencedCodeBlockWithLang", {
-    filter(node) {
-      return (
-        node.nodeName === "PRE" &&
-        node.firstChild !== null &&
-        node.firstChild.nodeName === "CODE"
-      );
-    },
+  // Code blocks — matches ALL <pre> elements. Detects language from:
+  //   1. <pre><code class="language-X"> (standard)
+  //   2. <pre data-lang="X"> (Code Hike / custom renderers)
+  //   3. Syntax-highlighted <span> classes (Sphinx/Pygments, Prism, etc.)
+  //   4. Plain <pre> (no language detected)
+  turndown.addRule("fencedCodeBlock", {
+    filter: "pre",
     replacement(_content, node) {
-      const codeElement = (node as HTMLElement).querySelector("code");
-      if (!codeElement) return _content;
+      const el = node as HTMLElement;
+      const codeElement = el.querySelector("code");
 
-      const code = codeElement.textContent || "";
-      const className = codeElement.getAttribute("class") || "";
-      const langMatch = className.match(/(?:language|lang|highlight)-(\w+)/);
-      let lang = langMatch ? langMatch[1] : "";
+      let code: string;
+      let lang = "";
+
+      if (codeElement) {
+        code = codeElement.textContent || "";
+        const className = codeElement.getAttribute("class") || "";
+        const langMatch = className.match(/(?:language|lang|highlight)-(\w+)/);
+        if (langMatch) lang = langMatch[1];
+      } else {
+        // Strip interactive elements (e.g. "Copy" buttons) before extracting text
+        const buttons = el.querySelectorAll("button");
+        Array.from(buttons).forEach((btn: unknown) => (btn as HTMLElement).remove());
+        code = el.textContent || "";
+
+        // Detect language from data-lang attribute (Code Hike)
+        lang = el.getAttribute("data-lang") || "";
+
+        // Detect language from Sphinx/Pygments span classes (e.g. class="gp" for prompts)
+        if (!lang) {
+          const firstSpan = el.querySelector("span[class]");
+          if (firstSpan) {
+            const cls = (firstSpan as HTMLElement).getAttribute("class") || "";
+            // Pygments uses short class names: gp (prompt), go (output),
+            // n (name), o (operator), c1 (comment), etc.
+            if (/^(gp|go|gt|n|nb|nn|o|p|mi|mf|s[12]?|c1?|k|kn|err)\b/.test(cls)) {
+              lang = "python"; // Pygments is overwhelmingly used for Python docs
+            }
+          }
+        }
+      }
 
       // Limit language tag length to prevent abuse
       if (lang.length > 50) lang = lang.substring(0, 50);
+
+      code = code.replace(/\n$/, "");
 
       // Find the longest run of backticks in content and use a longer fence
       const backtickRuns = code.match(/`+/g) || [];
@@ -90,7 +116,7 @@ function createTurndownService(options: ConverterOptions): TurndownService {
       const fenceLength = Math.max(3, maxRunLength + 1);
       const fence = "`".repeat(fenceLength);
 
-      return `\n\n${fence}${lang}\n${code.replace(/\n$/, "")}\n${fence}\n\n`;
+      return `\n\n${fence}${lang}\n${code}\n${fence}\n\n`;
     },
   });
 
