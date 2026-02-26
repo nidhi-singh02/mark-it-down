@@ -408,6 +408,52 @@ export async function fetchWithBrowser(
   }
 }
 
+// ─── Raw Text Fetcher (no Content-Type validation) ───────────────────────────
+
+/**
+ * Fetch a URL and return raw text without Content-Type validation.
+ * Uses the same SSRF protections and DNS pinning as fetchWithHttp.
+ * Returns null on any failure (network error, non-2xx status, etc.).
+ */
+export async function fetchRawText(
+  url: string,
+  timeout: number
+): Promise<{ body: string; contentType: string } | null> {
+  try {
+    const resolvedIP = await validateUrl(url);
+    const safTimeout = clampTimeout(timeout);
+    return await fetchRawTextInner(url, resolvedIP, safTimeout, MAX_REDIRECTS);
+  } catch {
+    return null;
+  }
+}
+
+async function fetchRawTextInner(
+  url: string,
+  resolvedIP: string,
+  timeout: number,
+  remainingRedirects: number
+): Promise<{ body: string; contentType: string } | null> {
+  const response = await pinnedRequest(url, resolvedIP, timeout);
+
+  if ([301, 302, 303, 307, 308].includes(response.status)) {
+    if (remainingRedirects <= 0) return null;
+    const location = response.headers["location"];
+    const locationStr = typeof location === "string" ? location : undefined;
+    if (!locationStr) return null;
+    const redirectUrl = new URL(locationStr, url).toString();
+    const redirectIP = await validateUrl(redirectUrl);
+    return fetchRawTextInner(redirectUrl, redirectIP, timeout, remainingRedirects - 1);
+  }
+
+  if (response.status < 200 || response.status >= 300) return null;
+
+  const raw = response.headers["content-type"];
+  const contentType = typeof raw === "string" ? raw : "";
+
+  return { body: response.body, contentType };
+}
+
 // ─── Public API ──────────────────────────────────────────────────────────────
 
 /**

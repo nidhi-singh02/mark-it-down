@@ -1,14 +1,14 @@
-import { fetchPage } from "./fetcher.js";
+import { fetchPage, fetchRawText } from "./fetcher.js";
 import { extractContent, isProbablyReaderable } from "./extractor.js";
-import { extractMdx } from "./mdx-extractor.js";
+import { extractMdx, processRawMdx } from "./mdx-extractor.js";
 import { htmlToMarkdown } from "./converter.js";
 import { ValidationError } from "./errors.js";
 import type { ConvertOptions, ConvertResult, PageMetadata } from "./types.js";
 
 export type { ConvertOptions, ConvertResult, PageMetadata };
-export { fetchPage, validateUrl } from "./fetcher.js";
+export { fetchPage, validateUrl, fetchRawText } from "./fetcher.js";
 export { extractContent } from "./extractor.js";
-export { extractMdx } from "./mdx-extractor.js";
+export { extractMdx, processRawMdx } from "./mdx-extractor.js";
 export { htmlToMarkdown } from "./converter.js";
 export {
   MarkitdownError,
@@ -17,6 +17,58 @@ export {
   NetworkError,
   ContentError,
 } from "./errors.js";
+
+// ─── Markdown URL Strategy ────────────────────────────────────────────────────
+
+/** Build a .md URL from a page URL (strips trailing slash, appends .md). */
+function buildMarkdownUrl(url: string): string | null {
+  try {
+    const parsed = new URL(url);
+    let pathname = parsed.pathname;
+    // Strip trailing slash
+    if (pathname.endsWith("/")) pathname = pathname.slice(0, -1);
+    // Skip root paths and paths that already have a file extension
+    if (!pathname || pathname === "/") return null;
+    if (/\.\w+$/.test(pathname)) return null;
+    parsed.pathname = pathname + ".md";
+    parsed.search = "";
+    parsed.hash = "";
+    return parsed.toString();
+  } catch {
+    return null;
+  }
+}
+
+/** Check if a response body looks like markdown (not HTML). */
+function isLikelyMarkdown(text: string): boolean {
+  const trimmed = text.trimStart();
+  if (trimmed.length < 50) return false;
+  // Reject HTML documents
+  if (/^<!doctype\s/i.test(trimmed) || /^<html[\s>]/i.test(trimmed)) return false;
+  // Reject responses with many HTML tags (likely an HTML error page)
+  const tagCount = (trimmed.slice(0, 2000).match(/<[a-z]+[\s>]/gi) || []).length;
+  if (tagCount > 10) return false;
+  return true;
+}
+
+/**
+ * Try to fetch raw markdown from the .md endpoint of a URL.
+ * Many documentation sites (Mintlify, GitBook, Next.js docs, etc.)
+ * serve raw markdown when .md is appended to the URL path.
+ */
+async function tryFetchMarkdownSource(
+  url: string,
+  timeout: number
+): Promise<{ markdown: string; metadata: PageMetadata } | null> {
+  const mdUrl = buildMarkdownUrl(url);
+  if (!mdUrl) return null;
+
+  const result = await fetchRawText(mdUrl, timeout);
+  if (!result) return null;
+  if (!isLikelyMarkdown(result.body)) return null;
+
+  return processRawMdx(result.body, url);
+}
 
 const DEFAULT_OPTIONS: Readonly<ConvertOptions> = Object.freeze({
   browser: false,
@@ -95,9 +147,32 @@ export async function convert(
 
   const opts: ConvertOptions = { ...DEFAULT_OPTIONS, ...options };
 
-  // URL validation and SSRF protection are handled inside fetchPage()
+  const warnings: string[] = [];
 
-  // Fetch
+  // ── Strategy 0: Try .md endpoint ────────────────────────────────────────
+  // Many doc sites (Mintlify, GitBook, Next.js docs, etc.) serve raw
+  // markdown when .md is appended to the URL path. This is the most
+  // reliable source — it includes all content without rendering artifacts.
+  if (!opts.raw) {
+    const mdSource = await tryFetchMarkdownSource(url, opts.timeout);
+    if (mdSource) {
+      let { markdown } = mdSource;
+      const { metadata } = mdSource;
+
+      if (opts.noImages) {
+        markdown = markdown.replace(/!\[[^\]]*\]\([^)]*\)\s*/g, "");
+      }
+      if (opts.frontmatter) {
+        const fm = generateFrontmatter(metadata, url);
+        markdown = fm + "\n\n" + markdown;
+      }
+
+      return { markdown, metadata, warnings };
+    }
+  }
+
+  // ── Fetch the HTML page ─────────────────────────────────────────────────
+  // URL validation and SSRF protection are handled inside fetchPage()
   const { html, finalUrl } = await fetchPage(url, {
     browser: opts.browser,
     timeout: opts.timeout,
@@ -112,11 +187,9 @@ export async function convert(
     lang: null,
   };
 
-  const warnings: string[] = [];
   let markdown: string;
 
-  // Try to extract raw MDX from Next.js RSC payloads first — this gives
-  // complete content including collapsed accordions, tabs, etc.
+  // ── Strategy 1–2: Extract MDX from RSC payloads ─────────────────────────
   const mdxResult = !opts.raw ? extractMdx(html, finalUrl) : null;
 
   if (mdxResult) {
@@ -127,7 +200,7 @@ export async function convert(
       markdown = markdown.replace(/!\[[^\]]*\]\([^)]*\)\s*/g, "");
     }
   } else {
-    // Standard path: extract content from HTML, then convert to markdown
+    // ── Strategy 3: Readability + HTML-to-Markdown ──────────────────────
     let contentHtml: string;
 
     if (opts.raw) {
