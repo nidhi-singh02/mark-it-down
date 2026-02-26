@@ -209,7 +209,7 @@ Content with <html> tags and "quotes".`;
 
     const result = extractMdx(rscPage(mdx), "https://example.com");
     expect(result).not.toBeNull();
-    expect(result!.markdown).toContain('<html>');
+    expect(result!.markdown).toContain("<html>");
     expect(result!.markdown).toContain('"quotes"');
   });
 

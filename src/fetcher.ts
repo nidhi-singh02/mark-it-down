@@ -4,12 +4,7 @@ import { request as httpRequest, type IncomingMessage } from "node:http";
 import { request as httpsRequest } from "node:https";
 import type { FetchResult } from "./types.js";
 import { normalizeIP, isPrivateIP } from "./ssrf.js";
-import {
-  ValidationError,
-  SSRFError,
-  NetworkError,
-  ContentError,
-} from "./errors.js";
+import { ValidationError, SSRFError, NetworkError, ContentError } from "./errors.js";
 
 // Re-export SSRF utilities so existing consumers keep working
 export { normalizeIP, isPrivateIP } from "./ssrf.js";
@@ -26,12 +21,9 @@ const MAX_TIMEOUT = 300_000;
 /** Minimum timeout: 1 second */
 const MIN_TIMEOUT = 1_000;
 
-const BLOCKED_HOSTNAMES: ReadonlySet<string> = Object.freeze(new Set([
-  "localhost",
-  "localhost.localdomain",
-  "metadata.google.internal",
-  "metadata",
-]));
+const BLOCKED_HOSTNAMES: ReadonlySet<string> = Object.freeze(
+  new Set(["localhost", "localhost.localdomain", "metadata.google.internal", "metadata"])
+);
 
 const BLOCKED_HOSTNAME_SUFFIXES = [
   ".internal",
@@ -101,9 +93,7 @@ export async function validateUrl(url: string): Promise<string> {
   try {
     parsed = new URL(url);
   } catch {
-    throw new ValidationError(
-      "Invalid URL. Please provide a valid HTTP or HTTPS URL."
-    );
+    throw new ValidationError("Invalid URL. Please provide a valid HTTP or HTTPS URL.");
   }
 
   if (!["http:", "https:"].includes(parsed.protocol)) {
@@ -168,14 +158,11 @@ function validateContentType(headers: Record<string, string | string[] | undefin
  */
 function createPinnedLookup(resolvedIP: string): LookupFunction {
   const family = resolvedIP.includes(":") ? 6 : 4;
-  return ((
-    _hostname: string,
-    options: unknown,
-    callback?: (...args: unknown[]) => void
-  ) => {
+  return ((_hostname: string, options: unknown, callback?: (...args: unknown[]) => void) => {
     // Node's lookup can be called with 2 or 3 args; normalize
     const cb = (typeof options === "function" ? options : callback) as (...args: unknown[]) => void;
-    const opts = (typeof options === "object" && options !== null) ? options as { all?: boolean } : {};
+    const opts =
+      typeof options === "object" && options !== null ? (options as { all?: boolean }) : {};
     if (opts.all) {
       cb(null, [{ address: resolvedIP, family }]);
     } else {
@@ -199,11 +186,7 @@ interface PinnedResponse {
   responseUrl: string;
 }
 
-function pinnedRequest(
-  url: string,
-  resolvedIP: string,
-  timeout: number
-): Promise<PinnedResponse> {
+function pinnedRequest(url: string, resolvedIP: string, timeout: number): Promise<PinnedResponse> {
   return new Promise((resolve, reject) => {
     const parsed = new URL(url);
     const isHttps = parsed.protocol === "https:";
@@ -218,8 +201,7 @@ function pinnedRequest(
         headers: {
           "User-Agent":
             "Mozilla/5.0 (compatible; web-to-markdown/0.1; +https://github.com/nidhi-singh02/mark-it-down)",
-          Accept:
-            "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+          Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
           "Accept-Language": "en-US,en;q=0.5",
         },
       },
@@ -299,12 +281,7 @@ export async function fetchWithHttp(
     }
     const redirectUrl = new URL(locationStr, url).toString();
     const redirectIP = await validateUrl(redirectUrl);
-    return fetchWithHttp(
-      redirectUrl,
-      redirectIP,
-      safTimeout,
-      remainingRedirects - 1
-    );
+    return fetchWithHttp(redirectUrl, redirectIP, safTimeout, remainingRedirects - 1);
   }
 
   if (response.status < 200 || response.status >= 300) {
@@ -333,17 +310,33 @@ export async function fetchWithBrowser(
   const safTimeout = clampTimeout(timeout);
 
   // Playwright is optional — define minimal structural types for the APIs we use
-  type PwRoute = { request(): { url(): string }; fulfill(opts: Record<string, unknown>): Promise<void>; abort(reason: string): Promise<void>; continue(): Promise<void> };
-  type PwPage = { goto(url: string, opts: Record<string, unknown>): Promise<void>; waitForTimeout(ms: number): Promise<void>; content(): Promise<string>; url(): string };
-  type PwContext = { newPage(): Promise<PwPage>; route(pattern: string, handler: (route: PwRoute) => Promise<void>): Promise<void> };
-  type PwBrowser = { newContext(opts: Record<string, unknown>): Promise<PwContext>; close(): Promise<void> };
+  type PwRoute = {
+    request(): { url(): string };
+    fulfill(opts: Record<string, unknown>): Promise<void>;
+    abort(reason: string): Promise<void>;
+    continue(): Promise<void>;
+  };
+  type PwPage = {
+    goto(url: string, opts: Record<string, unknown>): Promise<void>;
+    waitForTimeout(ms: number): Promise<void>;
+    content(): Promise<string>;
+    url(): string;
+  };
+  type PwContext = {
+    newPage(): Promise<PwPage>;
+    route(pattern: string, handler: (route: PwRoute) => Promise<void>): Promise<void>;
+  };
+  type PwBrowser = {
+    newContext(opts: Record<string, unknown>): Promise<PwContext>;
+    close(): Promise<void>;
+  };
   type PwModule = { chromium: { launch(opts: Record<string, unknown>): Promise<PwBrowser> } };
 
   let playwright: PwModule;
 
   try {
     const mod = "playwright";
-    playwright = await import(/* @vite-ignore */ mod) as PwModule;
+    playwright = (await import(/* @vite-ignore */ mod)) as PwModule;
   } catch {
     throw new NetworkError(
       [
@@ -365,10 +358,7 @@ export async function fetchWithBrowser(
 
   const browser = await playwright.chromium.launch({
     headless: true,
-    args: [
-      "--disable-websockets",
-      `--host-resolver-rules=${hostResolverRule}`,
-    ],
+    args: ["--disable-websockets", `--host-resolver-rules=${hostResolverRule}`],
   });
 
   try {

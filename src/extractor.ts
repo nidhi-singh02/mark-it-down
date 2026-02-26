@@ -10,10 +10,7 @@ import type { ExtractResult, PageMetadata } from "./types.js";
  * @param url - The page URL, used for resolving relative links.
  * @returns The extracted content and metadata, or `null` if extraction fails.
  */
-export function extractContent(
-  html: string,
-  url: string
-): ExtractResult | null {
+export function extractContent(html: string, url: string): ExtractResult | null {
   let document: ReturnType<typeof parseHTML>["document"];
   try {
     ({ document } = parseHTML(html));

@@ -29,10 +29,7 @@ function parseOctalIPv4(hostname: string): string | null {
 
   const octets: number[] = [];
   for (const part of parts) {
-    const num =
-      part.startsWith("0") && part.length > 1
-        ? parseInt(part, 8)
-        : parseInt(part, 10);
+    const num = part.startsWith("0") && part.length > 1 ? parseInt(part, 8) : parseInt(part, 10);
     if (isNaN(num) || num < 0 || num > 255) return null;
     octets.push(num);
   }
@@ -72,14 +69,10 @@ export function normalizeIP(hostname: string): string | null {
   if (isIP(bare) === 4) return bare;
 
   if (isIP(bare) === 6) {
-    const ffmpDotted = bare.match(
-      /^::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/i
-    );
+    const ffmpDotted = bare.match(/^::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/i);
     if (ffmpDotted) return ffmpDotted[1];
 
-    const ffmpHex = bare.match(
-      /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/i
-    );
+    const ffmpHex = bare.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/i);
     if (ffmpHex) {
       const high = parseInt(ffmpHex[1], 16);
       const low = parseInt(ffmpHex[2], 16);
@@ -87,18 +80,14 @@ export function normalizeIP(hostname: string): string | null {
     }
 
     const fullFfmpHex = expandIPv6(bare);
-    const fullFfmpMatch = fullFfmpHex.match(
-      /^0:0:0:0:0:ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/i
-    );
+    const fullFfmpMatch = fullFfmpHex.match(/^0:0:0:0:0:ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/i);
     if (fullFfmpMatch) {
       const high = parseInt(fullFfmpMatch[1], 16);
       const low = parseInt(fullFfmpMatch[2], 16);
       return `${(high >> 8) & 0xff}.${high & 0xff}.${(low >> 8) & 0xff}.${low & 0xff}`;
     }
 
-    const compatDotted = bare.match(
-      /^::(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/
-    );
+    const compatDotted = bare.match(/^::(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/);
     if (compatDotted) return compatDotted[1];
     const compatHex = bare.match(/^::([0-9a-f]{1,4}):([0-9a-f]{1,4})$/i);
     if (compatHex) {
@@ -107,13 +96,9 @@ export function normalizeIP(hostname: string): string | null {
       return `${(high >> 8) & 0xff}.${high & 0xff}.${(low >> 8) & 0xff}.${low & 0xff}`;
     }
 
-    const nat64Dotted = bare.match(
-      /^64:ff9b::(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/i
-    );
+    const nat64Dotted = bare.match(/^64:ff9b::(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/i);
     if (nat64Dotted) return nat64Dotted[1];
-    const nat64Hex = bare.match(
-      /^64:ff9b::([0-9a-f]{1,4}):([0-9a-f]{1,4})$/i
-    );
+    const nat64Hex = bare.match(/^64:ff9b::([0-9a-f]{1,4}):([0-9a-f]{1,4})$/i);
     if (nat64Hex) {
       const high = parseInt(nat64Hex[1], 16);
       const low = parseInt(nat64Hex[2], 16);
@@ -134,9 +119,7 @@ export function normalizeIP(hostname: string): string | null {
   }
 
   if (/^[\d.]+$/.test(bare) && bare.split(".").length === 4) {
-    const hasOctal = bare
-      .split(".")
-      .some((p) => p.startsWith("0") && p.length > 1);
+    const hasOctal = bare.split(".").some((p) => p.startsWith("0") && p.length > 1);
     if (hasOctal) {
       return parseOctalIPv4(bare);
     }

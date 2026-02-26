@@ -4,7 +4,12 @@ import { ContentError } from "./errors.js";
 
 /** Dangerous URL schemes that must not appear in markdown links. */
 const DANGEROUS_PROTOCOLS = [
-  "javascript:", "data:", "vbscript:", "jar:", "about:", "blob:",
+  "javascript:",
+  "data:",
+  "vbscript:",
+  "jar:",
+  "about:",
+  "blob:",
 ] as const;
 
 export interface ConverterOptions {
@@ -133,9 +138,7 @@ function createTurndownService(options: ConverterOptions): TurndownService {
         if (isDangerousUrl(href)) return escapeMarkdownBrackets(content);
 
         try {
-          const absoluteUrl = escapeMarkdownUrl(
-            new URL(href, options.baseUrl).toString()
-          );
+          const absoluteUrl = escapeMarkdownUrl(new URL(href, options.baseUrl).toString());
           const title = el.getAttribute("title");
           const safeContent = escapeMarkdownBrackets(content);
           return title
@@ -158,9 +161,7 @@ function createTurndownService(options: ConverterOptions): TurndownService {
         if (isDangerousUrl(src)) return "";
 
         try {
-          const absoluteUrl = escapeMarkdownUrl(
-            new URL(src, options.baseUrl).toString()
-          );
+          const absoluteUrl = escapeMarkdownUrl(new URL(src, options.baseUrl).toString());
           const alt = escapeMarkdownBrackets(el.getAttribute("alt") || "");
           const title = el.getAttribute("title");
           return title
@@ -222,10 +223,7 @@ function createTurndownService(options: ConverterOptions): TurndownService {
  * @returns A Markdown string with trailing newline.
  * @throws {ContentError} If the HTML is too deeply nested to process.
  */
-export function htmlToMarkdown(
-  html: string,
-  options: ConverterOptions = {}
-): string {
+export function htmlToMarkdown(html: string, options: ConverterOptions = {}): string {
   const turndown = createTurndownService(options);
   let markdown: string;
 

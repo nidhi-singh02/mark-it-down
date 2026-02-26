@@ -98,8 +98,7 @@ function parseFrontmatter(mdx: string): FrontmatterResult {
   const body = mdx.slice(fmMatch[0].length);
 
   // Simple YAML key: value parsing (handles multiline with indentation)
-  const title = extractYamlValue(yamlBlock, "title")
-    || extractYamlValue(yamlBlock, "seoTitle");
+  const title = extractYamlValue(yamlBlock, "title") || extractYamlValue(yamlBlock, "seoTitle");
   const description = extractYamlValue(yamlBlock, "description");
 
   return {
@@ -166,8 +165,7 @@ function stripMdxComponents(mdx: string): string {
   // <Accordion title="X">content</Accordion> → ### X\n\ncontent
   result = result.replace(
     /<Accordion\s+title="([^"]*)"[^>]*>\s*\n?([\s\S]*?)\n?\s*<\/Accordion>/g,
-    (_match, title: string, content: string) =>
-      `### ${title}\n\n${content.trim()}\n`,
+    (_match, title: string, content: string) => `### ${title}\n\n${content.trim()}\n`
   );
 
   // <Accordions> wrapper → remove
@@ -176,8 +174,7 @@ function stripMdxComponents(mdx: string): string {
   // <Tab value="X">content</Tab> → **X**\n\ncontent
   result = result.replace(
     /<Tab\s+value="([^"]*)"[^>]*>\s*\n?([\s\S]*?)\n?\s*<\/Tab>/g,
-    (_match, value: string, content: string) =>
-      `**${value}**\n\n${content.trim()}\n`,
+    (_match, value: string, content: string) => `**${value}**\n\n${content.trim()}\n`
   );
 
   // <Tabs items={[...]}> wrapper → remove
@@ -190,7 +187,7 @@ function stripMdxComponents(mdx: string): string {
     (_match, content: string) => {
       const lines = content.trim().split("\n");
       return lines.map((line) => `> ${line}`).join("\n") + "\n";
-    },
+    }
   );
 
   // Strip any remaining self-closing JSX components (e.g. <Component />)
@@ -218,7 +215,6 @@ function resolveRelativeUrls(markdown: string, baseUrl: string): string {
   // ![alt](/path) → ![alt](https://example.com/path)
   return markdown.replace(
     /(\[(?:[^\]\\]|\\.)*\]\()(\/((?:[^)\\]|\\.)*))\)/g,
-    (_match, prefix: string, _fullPath: string, path: string) =>
-      `${prefix}${origin}/${path})`,
+    (_match, prefix: string, _fullPath: string, path: string) => `${prefix}${origin}/${path})`
   );
 }

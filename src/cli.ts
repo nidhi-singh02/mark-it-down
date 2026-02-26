@@ -77,27 +77,11 @@ export function createProgram(): Command {
     .version(getPackageVersion())
     .argument("<url>", "URL of the web page to convert")
     .option("-o, --output <file>", "Write to file instead of stdout")
-    .option(
-      "-b, --browser",
-      "Force headless browser rendering (for SPAs)",
-      false
-    )
-    .option(
-      "-r, --raw",
-      "Convert full HTML without content extraction",
-      false
-    )
-    .option(
-      "-f, --frontmatter",
-      "Include YAML frontmatter with metadata",
-      false
-    )
+    .option("-b, --browser", "Force headless browser rendering (for SPAs)", false)
+    .option("-r, --raw", "Convert full HTML without content extraction", false)
+    .option("-f, --frontmatter", "Include YAML frontmatter with metadata", false)
     .option("--no-images", "Strip images from output")
-    .option(
-      "--timeout <ms>",
-      "Timeout for page loading in milliseconds",
-      "30000"
-    )
+    .option("--timeout <ms>", "Timeout for page loading in milliseconds", "30000")
     .action(async (url: string, opts: Record<string, unknown>) => {
       try {
         const result = await convert(url, {
@@ -122,8 +106,7 @@ export function createProgram(): Command {
         }
       } catch (error: unknown) {
         const prefix = error instanceof MarkitdownError ? error.name : "Error";
-        const message =
-          error instanceof Error ? error.message : String(error);
+        const message = error instanceof Error ? error.message : String(error);
         process.stderr.write(`${prefix}: ${message}\n`);
         process.exitCode = 1;
       }

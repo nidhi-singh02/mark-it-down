@@ -33,31 +33,22 @@ const DEFAULT_OPTIONS: Readonly<ConvertOptions> = Object.freeze({
 function sanitizeYamlValue(value: string): string {
   const CONTROL_CHARS_RE = /[\x00-\x1f\x7f]/g; // eslint-disable-line no-control-regex
   return value
-    .replace(/\\/g, "\\\\")                    // escape backslashes first
-    .replace(/"/g, '\\"')                       // escape double quotes
+    .replace(/\\/g, "\\\\") // escape backslashes first
+    .replace(/"/g, '\\"') // escape double quotes
     .replace(/[\r\n\u0085\u2028\u2029]+/g, " ") // collapse all line breaks (including Unicode)
-    .replace(CONTROL_CHARS_RE, "")              // strip all ASCII control chars (tabs, etc.)
+    .replace(CONTROL_CHARS_RE, "") // strip all ASCII control chars (tabs, etc.)
     .trim();
 }
 
-function generateFrontmatter(
-  metadata: PageMetadata,
-  sourceUrl: string
-): string {
+function generateFrontmatter(metadata: PageMetadata, sourceUrl: string): string {
   const lines: string[] = ["---"];
 
-  if (metadata.title)
-    lines.push(`title: "${sanitizeYamlValue(metadata.title)}"`);
-  if (metadata.byline)
-    lines.push(`author: "${sanitizeYamlValue(metadata.byline)}"`);
-  if (metadata.publishedTime)
-    lines.push(`date: "${sanitizeYamlValue(metadata.publishedTime)}"`);
-  if (metadata.excerpt)
-    lines.push(`description: "${sanitizeYamlValue(metadata.excerpt)}"`);
-  if (metadata.siteName)
-    lines.push(`site: "${sanitizeYamlValue(metadata.siteName)}"`);
-  if (metadata.lang)
-    lines.push(`lang: "${sanitizeYamlValue(metadata.lang)}"`);
+  if (metadata.title) lines.push(`title: "${sanitizeYamlValue(metadata.title)}"`);
+  if (metadata.byline) lines.push(`author: "${sanitizeYamlValue(metadata.byline)}"`);
+  if (metadata.publishedTime) lines.push(`date: "${sanitizeYamlValue(metadata.publishedTime)}"`);
+  if (metadata.excerpt) lines.push(`description: "${sanitizeYamlValue(metadata.excerpt)}"`);
+  if (metadata.siteName) lines.push(`site: "${sanitizeYamlValue(metadata.siteName)}"`);
+  if (metadata.lang) lines.push(`lang: "${sanitizeYamlValue(metadata.lang)}"`);
   lines.push(`source: "${sanitizeYamlValue(sourceUrl)}"`);
   lines.push("---");
 
