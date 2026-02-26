@@ -121,7 +121,7 @@ describe("htmlToMarkdown", () => {
   });
 
   it("throws on deeply nested HTML (stack overflow protection)", () => {
-    const depth = 20_000;
+    const depth = 600;
     const html = "<div>".repeat(depth) + "deep" + "</div>".repeat(depth);
     expect(() => htmlToMarkdown(html)).toThrow("too deeply nested");
   });

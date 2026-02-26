@@ -356,7 +356,6 @@ function evaluateMdxChunk(code: string): JsxNode | null {
     // The chunk uses arguments[0] to access the React runtime.
     // new Function(body) creates function anonymous() { body },
     // so arguments[0] resolves to the first call argument.
-    // eslint-disable-next-line @typescript-eslint/no-implied-eval
     const fn = new Function(code) as (runtime: Record<string, unknown>) => {
       default?: (props: object) => JsxNode;
     };

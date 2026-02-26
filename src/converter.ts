@@ -210,6 +210,25 @@ function createTurndownService(options: ConverterOptions): TurndownService {
 }
 
 /**
+ * Quick heuristic to detect excessively nested HTML.
+ * Scans for opening/closing tags and bails as soon as depth exceeds `limit`.
+ * Self-closing tags (e.g. `<br/>`) are ignored.
+ */
+function exceedsMaxDepth(html: string, limit: number): boolean {
+  let depth = 0;
+  const re = /<\/?[a-z][a-z0-9]*\b[^>]*>/gi;
+  let m;
+  while ((m = re.exec(html))) {
+    if (m[0][1] === "/") {
+      depth--;
+    } else if (!m[0].endsWith("/>")) {
+      if (++depth > limit) return true;
+    }
+  }
+  return false;
+}
+
+/**
  * Convert an HTML string to Markdown.
  *
  * Uses Turndown with GFM extensions. Resolves relative URLs to absolute
@@ -224,13 +243,22 @@ function createTurndownService(options: ConverterOptions): TurndownService {
  * @throws {ContentError} If the HTML is too deeply nested to process.
  */
 export function htmlToMarkdown(html: string, options: ConverterOptions = {}): string {
+  // Explicit depth guard — prevents infinite hangs on modern V8 where
+  // deeply nested HTML doesn't throw RangeError but just runs forever.
+  if (exceedsMaxDepth(html, 500)) {
+    throw new ContentError(
+      "HTML content is too deeply nested to process safely. " +
+        "The page may contain malformed or adversarial markup."
+    );
+  }
+
   const turndown = createTurndownService(options);
   let markdown: string;
 
   try {
     markdown = turndown.turndown(html);
   } catch (err: unknown) {
-    // Catch stack overflow from deeply nested HTML
+    // Catch stack overflow from deeply nested HTML (fallback for older runtimes)
     if (err instanceof RangeError) {
       throw new ContentError(
         "HTML content is too deeply nested to process safely. " +
