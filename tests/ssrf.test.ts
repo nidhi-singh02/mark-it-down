@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { normalizeIP, isPrivateIP, validateUrl, clampTimeout } from "../src/fetcher.js";
+import { normalizeIP, isPrivateIP } from "../src/ssrf.js";
+import { validateUrl, clampTimeout } from "../src/fetcher.js";
 
 // ─── normalizeIP ─────────────────────────────────────────────────────────────
 

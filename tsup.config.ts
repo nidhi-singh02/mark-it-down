@@ -11,7 +11,7 @@ export default defineConfig([
     clean: true,
   },
   {
-    entry: { "bin/markitdown": "bin/markitdown.ts" },
+    entry: { "bin/web-to-markdown": "bin/web-to-markdown.ts" },
     format: ["esm"],
     target: "node18",
     splitting: false,

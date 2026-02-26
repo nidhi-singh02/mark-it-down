@@ -1,10 +1,11 @@
 import TurndownService from "turndown";
 import { gfm } from "@joplin/turndown-plugin-gfm";
+import { ContentError } from "./errors.js";
 
 /** Dangerous URL schemes that must not appear in markdown links. */
 const DANGEROUS_PROTOCOLS = [
   "javascript:", "data:", "vbscript:", "jar:", "about:", "blob:",
-];
+] as const;
 
 export interface ConverterOptions {
   /** Base URL for resolving relative URLs to absolute. */
@@ -21,9 +22,8 @@ export interface ConverterOptions {
 function isDangerousUrl(href: string): boolean {
   // Strip all ASCII control characters (U+0000–U+001F), DEL (U+007F),
   // zero-width characters (U+200B–U+200D, U+FEFF), and whitespace
-  const cleaned = href
-    .replace(/[\x00-\x1f\x7f\u200b-\u200d\ufeff\s]+/g, "")
-    .toLowerCase();
+  const CONTROL_AND_ZW_RE = /[\x00-\x1f\x7f\u200b-\u200d\ufeff\s]+/g; // eslint-disable-line no-control-regex
+  const cleaned = href.replace(CONTROL_AND_ZW_RE, "").toLowerCase();
   return DANGEROUS_PROTOCOLS.some((proto) => cleaned.startsWith(proto));
 }
 
@@ -184,6 +184,17 @@ function createTurndownService(options: ConverterOptions): TurndownService {
 
 /**
  * Convert an HTML string to Markdown.
+ *
+ * Uses Turndown with GFM extensions. Resolves relative URLs to absolute
+ * when `baseUrl` is provided. Filters dangerous protocols and optionally
+ * strips images.
+ *
+ * @param html - The HTML string to convert.
+ * @param options - Conversion options.
+ * @param options.baseUrl - Base URL for resolving relative links.
+ * @param options.stripImages - If `true`, remove all images from output.
+ * @returns A Markdown string with trailing newline.
+ * @throws {ContentError} If the HTML is too deeply nested to process.
  */
 export function htmlToMarkdown(
   html: string,
@@ -197,9 +208,10 @@ export function htmlToMarkdown(
   } catch (err: unknown) {
     // Catch stack overflow from deeply nested HTML
     if (err instanceof RangeError) {
-      throw new Error(
+      throw new ContentError(
         "HTML content is too deeply nested to process safely. " +
-          "The page may contain malformed or adversarial markup."
+          "The page may contain malformed or adversarial markup.",
+        { cause: err }
       );
     }
     throw err;

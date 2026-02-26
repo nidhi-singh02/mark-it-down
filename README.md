@@ -1,4 +1,4 @@
-# markitdown
+# web-to-markdown
 
 Convert any web page to clean Markdown. Built for developers and LLM pipelines.
 
@@ -12,13 +12,13 @@ npm install
 npm run build
 
 # Run
-node dist/bin/markitdown.js https://example.com
+node dist/bin/web-to-markdown.js https://example.com
 ```
 
 ## Usage
 
 ```bash
-markitdown <url> [options]
+web-to-markdown <url> [options]
 ```
 
 ### Options
@@ -36,22 +36,22 @@ markitdown <url> [options]
 
 ```bash
 # Convert a page and print to terminal
-markitdown https://en.wikipedia.org/wiki/Markdown
+web-to-markdown https://en.wikipedia.org/wiki/Markdown
 
 # Save to a file
-markitdown https://example.com -o page.md
+web-to-markdown https://example.com -o page.md
 
 # Include title, author, date as YAML frontmatter
-markitdown https://example.com -f
+web-to-markdown https://example.com -f
 
 # Strip all images
-markitdown https://example.com --no-images
+web-to-markdown https://example.com --no-images
 
 # Convert raw HTML without content extraction
-markitdown https://example.com -r
+web-to-markdown https://example.com -r
 
 # Pipe to another tool (only markdown goes to stdout)
-markitdown https://example.com | head -20
+web-to-markdown https://example.com | head -20
 ```
 
 ### SPA / JavaScript-Rendered Pages
@@ -64,19 +64,19 @@ npm install playwright
 npx playwright install chromium
 
 # Then use the --browser flag
-markitdown https://react.dev --browser
+web-to-markdown https://react.dev --browser
 ```
 
 Playwright is an optional dependency (~100MB) and is only needed for JS-rendered pages.
 
 ## Global Install
 
-To use `markitdown` as a command anywhere:
+To use `web-to-markdown` as a command anywhere:
 
 ```bash
 npm run build
 npm link
-markitdown https://example.com
+web-to-markdown https://example.com
 ```
 
 ## Programmatic API
@@ -84,7 +84,7 @@ markitdown https://example.com
 The converter is also usable as a library:
 
 ```typescript
-import { convert } from "markitdown";
+import { convert } from "web-to-markdown";
 
 const { markdown, metadata } = await convert("https://example.com", {
   frontmatter: true,
@@ -98,7 +98,7 @@ console.log(markdown);
 Individual modules are also exported:
 
 ```typescript
-import { fetchPage, extractContent, htmlToMarkdown } from "markitdown";
+import { fetchPage, extractContent, htmlToMarkdown } from "web-to-markdown";
 ```
 
 ## How It Works

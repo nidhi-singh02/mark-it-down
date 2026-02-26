@@ -5,12 +5,16 @@ import type { ExtractResult, PageMetadata } from "./types.js";
 /**
  * Extract the main article content from raw HTML using
  * Mozilla Readability + linkedom DOM parsing.
+ *
+ * @param html - The raw HTML string to process.
+ * @param url - The page URL, used for resolving relative links.
+ * @returns The extracted content and metadata, or `null` if extraction fails.
  */
 export function extractContent(
   html: string,
   url: string
 ): ExtractResult | null {
-  let document: any;
+  let document: ReturnType<typeof parseHTML>["document"];
   try {
     ({ document } = parseHTML(html));
   } catch (err: unknown) {
@@ -24,7 +28,8 @@ export function extractContent(
   baseElement.setAttribute("href", url);
   document.head.appendChild(baseElement);
 
-  const reader = new Readability(document as any, {
+  // linkedom's Document implements the DOM API that Readability expects
+  const reader = new Readability(document as unknown as Document, {
     charThreshold: 100,
     maxElemsToParse: 100_000, // Limit DOM elements to prevent resource exhaustion
   });
@@ -56,6 +61,9 @@ export function extractContent(
 /**
  * Heuristic check: if body text is very short, the page likely
  * needs JavaScript rendering to produce meaningful content.
+ *
+ * @param html - The raw HTML string to check.
+ * @returns `true` if the page has more than 200 characters of body text.
  */
 export function isProbablyReaderable(html: string): boolean {
   const { document } = parseHTML(html);

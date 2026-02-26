@@ -1,8 +1,30 @@
 import { resolve, dirname } from "node:path";
-import { existsSync, lstatSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync } from "node:fs";
 import { realpath, writeFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import { Command } from "commander";
 import { convert } from "./index.js";
+import { MarkitdownError } from "./errors.js";
+
+/**
+ * Read the package version from package.json at runtime.
+ * This ensures the CLI `--version` flag always matches the published version
+ * without hardcoding it in two places.
+ */
+function getPackageVersion(): string {
+  try {
+    const __dirname = dirname(fileURLToPath(import.meta.url));
+    // Try ../package.json first (src/ dev), then ../../package.json (dist/bin/ built)
+    let pkgPath = resolve(__dirname, "..", "package.json");
+    if (!existsSync(pkgPath)) {
+      pkgPath = resolve(__dirname, "..", "..", "package.json");
+    }
+    const pkg = JSON.parse(readFileSync(pkgPath, "utf-8")) as { version: string };
+    return pkg.version;
+  } catch {
+    return "0.0.0"; // Fallback; should never happen in practice
+  }
+}
 
 /**
  * Validate the output path to prevent writing to sensitive locations.
@@ -50,9 +72,9 @@ export function createProgram(): Command {
   const program = new Command();
 
   program
-    .name("markitdown")
+    .name("web-to-markdown")
     .description("Convert any web page to clean Markdown")
-    .version("0.1.0")
+    .version(getPackageVersion())
     .argument("<url>", "URL of the web page to convert")
     .option("-o, --output <file>", "Write to file instead of stdout")
     .option(
@@ -99,10 +121,11 @@ export function createProgram(): Command {
           process.stdout.write(result.markdown);
         }
       } catch (error: unknown) {
+        const prefix = error instanceof MarkitdownError ? error.name : "Error";
         const message =
           error instanceof Error ? error.message : String(error);
-        process.stderr.write(`Error: ${message}\n`);
-        process.exit(1);
+        process.stderr.write(`${prefix}: ${message}\n`);
+        process.exitCode = 1;
       }
     });
 
@@ -111,5 +134,33 @@ export function createProgram(): Command {
 
 export async function run(): Promise<void> {
   const program = createProgram();
+
+  // ── Global safety nets ──────────────────────────────────────────────
+  // Catch truly unexpected errors that escape all try/catch blocks.
+  // Without these, Node exits silently or with a cryptic stack trace.
+  process.on("uncaughtException", (err) => {
+    process.stderr.write(`Fatal: ${err instanceof Error ? err.message : String(err)}\n`);
+    process.exitCode = 1;
+  });
+  process.on("unhandledRejection", (reason) => {
+    process.stderr.write(
+      `Fatal: Unhandled promise rejection: ${reason instanceof Error ? reason.message : String(reason)}\n`
+    );
+    process.exitCode = 1;
+  });
+
+  // ── Graceful shutdown ───────────────────────────────────────────────
+  // Handle SIGINT/SIGTERM so in-flight work can finish cleanly
+  // instead of leaving partial output files or zombie browser processes.
+  const onSignal = (signal: string) => {
+    process.stderr.write(`\nReceived ${signal}, shutting down…\n`);
+    process.exitCode = 130;
+    // Allow Node's default handler to finish the process
+    process.removeListener("SIGINT", onSignal);
+    process.removeListener("SIGTERM", onSignal);
+  };
+  process.on("SIGINT", onSignal);
+  process.on("SIGTERM", onSignal);
+
   await program.parseAsync(process.argv);
 }

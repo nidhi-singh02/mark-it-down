@@ -1,17 +1,21 @@
 {
-  "name": "markitdown",
+  "name": "web-to-markdown",
   "version": "0.1.0",
   "description": "Convert any web page to clean Markdown. Built for developers and LLM pipelines.",
   "author": "Nidhi Singh",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/nidhisingh/mark-it-down.git"
+    "url": "git+https://github.com/nidhi-singh02/mark-it-down.git"
+  },
+  "homepage": "https://github.com/nidhi-singh02/mark-it-down#readme",
+  "bugs": {
+    "url": "https://github.com/nidhi-singh02/mark-it-down/issues"
   },
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
-    "markitdown": "./dist/bin/markitdown.js"
+    "web-to-markdown": "./dist/bin/web-to-markdown.js"
   },
   "exports": {
     ".": {
@@ -20,14 +24,22 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "LICENSE"
   ],
+  "sideEffects": false,
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit"
+    "test:coverage": "vitest run --coverage",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src/ tests/ bin/",
+    "format": "prettier --write src/ tests/ bin/",
+    "format:check": "prettier --check src/ tests/ bin/",
+    "validate": "npm run lint && npm run format:check && npm run typecheck && npm run test",
+    "prepublishOnly": "npm run validate && npm run build"
   },
   "keywords": [
     "markdown",
@@ -50,10 +62,14 @@
     "turndown": "^7.2.0"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/node": "^22.0.0",
     "@types/turndown": "^5.0.5",
+    "eslint": "^10.0.2",
+    "prettier": "^3.8.1",
     "tsup": "^8.5.0",
     "typescript": "^5.7.0",
+    "typescript-eslint": "^8.56.1",
     "vitest": "^4.0.18"
   },
   "peerDependencies": {

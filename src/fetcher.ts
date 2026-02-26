@@ -1,8 +1,18 @@
 import { lookup } from "node:dns/promises";
-import { isIP } from "node:net";
+import type { LookupFunction } from "node:net";
 import { request as httpRequest, type IncomingMessage } from "node:http";
 import { request as httpsRequest } from "node:https";
 import type { FetchResult } from "./types.js";
+import { normalizeIP, isPrivateIP } from "./ssrf.js";
+import {
+  ValidationError,
+  SSRFError,
+  NetworkError,
+  ContentError,
+} from "./errors.js";
+
+// Re-export SSRF utilities so existing consumers keep working
+export { normalizeIP, isPrivateIP } from "./ssrf.js";
 
 /** Maximum response body size: 10 MB */
 const MAX_RESPONSE_SIZE = 10 * 1024 * 1024;
@@ -16,160 +26,12 @@ const MAX_TIMEOUT = 300_000;
 /** Minimum timeout: 1 second */
 const MIN_TIMEOUT = 1_000;
 
-// ─── IP Normalization & SSRF Protection ──────────────────────────────────────
-
-function decimalToIPv4(decimal: number): string | null {
-  if (!Number.isInteger(decimal) || decimal < 0 || decimal > 0xffffffff) {
-    return null;
-  }
-  return [
-    (decimal >>> 24) & 0xff,
-    (decimal >>> 16) & 0xff,
-    (decimal >>> 8) & 0xff,
-    decimal & 0xff,
-  ].join(".");
-}
-
-function parseOctalIPv4(hostname: string): string | null {
-  const parts = hostname.split(".");
-  if (parts.length !== 4) return null;
-
-  const octets: number[] = [];
-  for (const part of parts) {
-    const num = part.startsWith("0") && part.length > 1
-      ? parseInt(part, 8)
-      : parseInt(part, 10);
-    if (isNaN(num) || num < 0 || num > 255) return null;
-    octets.push(num);
-  }
-  return octets.join(".");
-}
-
-function expandIPv6(ip: string): string {
-  const halves = ip.split("::");
-  let groups: string[] = [];
-
-  if (halves.length === 2) {
-    const left = halves[0] ? halves[0].split(":") : [];
-    const right = halves[1] ? halves[1].split(":") : [];
-    const missing = 8 - left.length - right.length;
-    groups = [...left, ...Array(missing).fill("0"), ...right];
-  } else {
-    groups = ip.split(":");
-  }
-
-  return groups.map((g) => g.toLowerCase()).join(":");
-}
-
-/** @internal Exported for testing — will move to ssrf.ts */
-export function normalizeIP(hostname: string): string | null {
-  const bare = hostname.replace(/^\[|\]$/g, "");
-
-  if (isIP(bare) === 4) return bare;
-
-  if (isIP(bare) === 6) {
-    const ffmpDotted = bare.match(/^::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/i);
-    if (ffmpDotted) return ffmpDotted[1];
-
-    const ffmpHex = bare.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/i);
-    if (ffmpHex) {
-      const high = parseInt(ffmpHex[1], 16);
-      const low = parseInt(ffmpHex[2], 16);
-      return `${(high >> 8) & 0xff}.${high & 0xff}.${(low >> 8) & 0xff}.${low & 0xff}`;
-    }
-
-    const fullFfmpHex = expandIPv6(bare);
-    const fullFfmpMatch = fullFfmpHex.match(/^0:0:0:0:0:ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/i);
-    if (fullFfmpMatch) {
-      const high = parseInt(fullFfmpMatch[1], 16);
-      const low = parseInt(fullFfmpMatch[2], 16);
-      return `${(high >> 8) & 0xff}.${high & 0xff}.${(low >> 8) & 0xff}.${low & 0xff}`;
-    }
-
-    const compatDotted = bare.match(/^::(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/);
-    if (compatDotted) return compatDotted[1];
-    const compatHex = bare.match(/^::([0-9a-f]{1,4}):([0-9a-f]{1,4})$/i);
-    if (compatHex) {
-      const high = parseInt(compatHex[1], 16);
-      const low = parseInt(compatHex[2], 16);
-      return `${(high >> 8) & 0xff}.${high & 0xff}.${(low >> 8) & 0xff}.${low & 0xff}`;
-    }
-
-    const nat64Dotted = bare.match(/^64:ff9b::(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/i);
-    if (nat64Dotted) return nat64Dotted[1];
-    const nat64Hex = bare.match(/^64:ff9b::([0-9a-f]{1,4}):([0-9a-f]{1,4})$/i);
-    if (nat64Hex) {
-      const high = parseInt(nat64Hex[1], 16);
-      const low = parseInt(nat64Hex[2], 16);
-      return `${(high >> 8) & 0xff}.${high & 0xff}.${(low >> 8) & 0xff}.${low & 0xff}`;
-    }
-
-    return expandIPv6(bare);
-  }
-
-  if (/^0x[0-9a-f]+$/i.test(bare)) {
-    const decimal = parseInt(bare, 16);
-    return decimalToIPv4(decimal);
-  }
-
-  if (/^\d+$/.test(bare) && !bare.includes(".")) {
-    const decimal = parseInt(bare, 10);
-    return decimalToIPv4(decimal);
-  }
-
-  if (/^[\d.]+$/.test(bare) && bare.split(".").length === 4) {
-    const hasOctal = bare.split(".").some((p) => p.startsWith("0") && p.length > 1);
-    if (hasOctal) {
-      return parseOctalIPv4(bare);
-    }
-  }
-
-  return null;
-}
-
-/** @internal Exported for testing — will move to ssrf.ts */
-export function isPrivateIP(ip: string): boolean {
-  if (ip.startsWith("127.")) return true;
-  if (ip.startsWith("10.")) return true;
-  if (ip.startsWith("0.")) return true;
-  if (ip.startsWith("169.254.")) return true;
-  if (ip.startsWith("192.168.")) return true;
-  if (/^172\.(1[6-9]|2\d|3[01])\./.test(ip)) return true;
-
-  const cgnatMatch = ip.match(/^100\.(\d+)\./);
-  if (cgnatMatch) {
-    const secondOctet = parseInt(cgnatMatch[1], 10);
-    if (secondOctet >= 64 && secondOctet <= 127) return true;
-  }
-
-  if (ip.startsWith("192.0.0.")) return true;
-  if (ip.startsWith("192.0.2.")) return true;
-  if (ip.startsWith("198.51.100.")) return true;
-  if (ip.startsWith("203.0.113.")) return true;
-  if (/^198\.(18|19)\./.test(ip)) return true;
-  if (/^24[0-9]\./.test(ip) || ip.startsWith("255.")) return true;
-
-  const expanded = ip.includes("::") ? expandIPv6(ip) : ip.toLowerCase();
-
-  if (ip === "::1" || ip === "::" || expanded === "0:0:0:0:0:0:0:1" || expanded === "0:0:0:0:0:0:0:0") return true;
-  if (expanded.startsWith("fc") || expanded.startsWith("fd")) return true;
-  if (expanded.startsWith("fe80:") || expanded.startsWith("fe8") || expanded.startsWith("fe9") || expanded.startsWith("fea") || expanded.startsWith("feb")) return true;
-  if (expanded.startsWith("fec0:") || expanded.startsWith("fec") || expanded.startsWith("fed") || expanded.startsWith("fee") || expanded.startsWith("fef")) return true;
-  if (expanded.startsWith("ff")) return true;
-  if (expanded.startsWith("64:ff9b:")) return true;
-  if (expanded.startsWith("2002:")) return true;
-  if (expanded.startsWith("2001:db8:")) return true;
-  if (expanded.startsWith("2001:0:")) return true;
-
-  return false;
-}
-
-const BLOCKED_HOSTNAMES = new Set([
+const BLOCKED_HOSTNAMES: ReadonlySet<string> = Object.freeze(new Set([
   "localhost",
   "localhost.localdomain",
   "metadata.google.internal",
   "metadata",
-]);
+]));
 
 const BLOCKED_HOSTNAME_SUFFIXES = [
   ".internal",
@@ -178,7 +40,7 @@ const BLOCKED_HOSTNAME_SUFFIXES = [
   ".corp",
   ".home",
   ".lan",
-];
+] as const;
 
 export function clampTimeout(timeout: number): number {
   if (!Number.isFinite(timeout) || timeout < MIN_TIMEOUT) return MIN_TIMEOUT;
@@ -190,7 +52,7 @@ async function resolveAndValidateHostname(hostname: string): Promise<string> {
   const normalizedIP = normalizeIP(hostname);
   if (normalizedIP !== null) {
     if (isPrivateIP(normalizedIP)) {
-      throw new Error(
+      throw new SSRFError(
         `Blocked request to private/internal IP address: ${hostname}. ` +
           "Requests to internal networks are not allowed."
       );
@@ -201,36 +63,51 @@ async function resolveAndValidateHostname(hostname: string): Promise<string> {
   try {
     const { address } = await lookup(hostname);
     if (isPrivateIP(address)) {
-      throw new Error(
+      throw new SSRFError(
         `Blocked request to "${hostname}" — resolves to private IP. ` +
           "Requests to internal networks are not allowed."
       );
     }
     return address;
   } catch (err: unknown) {
-    if (err instanceof Error && err.message.startsWith("Blocked")) throw err;
+    if (err instanceof SSRFError) throw err;
     if (err instanceof Error) {
-      throw new Error(
+      throw new NetworkError(
         `DNS lookup failed for "${hostname}": ${err.message.includes("ENOTFOUND") ? "hostname not found" : "resolution error"}. ` +
-          "Check the URL."
+          "Check the URL.",
+        undefined,
+        { cause: err }
       );
     }
-    throw new Error(`DNS lookup failed for "${hostname}". Check the URL.`);
+    throw new NetworkError(`DNS lookup failed for "${hostname}". Check the URL.`);
   }
 }
 
+/**
+ * Validate a URL for safety and resolve its hostname to an IP.
+ *
+ * Checks protocol, hostname blocklists, and private IP ranges.
+ * Performs a single DNS lookup and returns the resolved IP for
+ * pinned connections that prevent DNS rebinding.
+ *
+ * @param url - The URL string to validate.
+ * @returns The resolved IP address to pin connections to.
+ * @throws {ValidationError} If the URL is malformed or uses an unsupported protocol.
+ * @throws {SSRFError} If the hostname or resolved IP is private/internal.
+ * @throws {NetworkError} If DNS resolution fails.
+ */
 export async function validateUrl(url: string): Promise<string> {
   let parsed: URL;
   try {
     parsed = new URL(url);
   } catch {
-    throw new Error(
+    throw new ValidationError(
       "Invalid URL. Please provide a valid HTTP or HTTPS URL."
     );
   }
 
   if (!["http:", "https:"].includes(parsed.protocol)) {
-    throw new Error(
+    throw new ValidationError(
       `Unsupported protocol "${parsed.protocol}". Only HTTP and HTTPS are supported.`
     );
   }
@@ -238,14 +115,14 @@ export async function validateUrl(url: string): Promise<string> {
   const hostname = parsed.hostname.toLowerCase();
 
   if (BLOCKED_HOSTNAMES.has(hostname)) {
-    throw new Error(
+    throw new SSRFError(
       `Blocked request to "${hostname}". Requests to internal hosts are not allowed.`
     );
   }
 
   for (const suffix of BLOCKED_HOSTNAME_SUFFIXES) {
     if (hostname.endsWith(suffix)) {
-      throw new Error(
+      throw new SSRFError(
         `Blocked request to "${hostname}". Requests to internal hosts are not allowed.`
       );
     }
@@ -261,7 +138,7 @@ const HTML_CONTENT_TYPES = [
   "application/xhtml+xml",
   "application/xml",
   "text/xml",
-];
+] as const;
 
 function validateContentType(headers: Record<string, string | string[] | undefined>): void {
   const raw = headers["content-type"];
@@ -271,7 +148,7 @@ function validateContentType(headers: Record<string, string | string[] | undefin
 
   const isHtmlLike = HTML_CONTENT_TYPES.some((ct) => contentType.includes(ct));
   if (!isHtmlLike) {
-    throw new Error(
+    throw new ContentError(
       `Unexpected Content-Type "${contentType.split(";")[0].trim()}" for the response. ` +
         "Expected an HTML document."
     );
@@ -289,21 +166,22 @@ function validateContentType(headers: Record<string, string | string[] | undefin
  * - all:false (default on Node <20): callback(null, address, family)
  * - all:true  (Node 20+ autoSelectFamily): callback(null, [{address, family}])
  */
-function createPinnedLookup(resolvedIP: string) {
+function createPinnedLookup(resolvedIP: string): LookupFunction {
   const family = resolvedIP.includes(":") ? 6 : 4;
-  return (
+  return ((
     _hostname: string,
-    options: { all?: boolean } | number | undefined,
-    callback: Function
+    options: unknown,
+    callback?: (...args: unknown[]) => void
   ) => {
-    // options can be {all: true} (object), a family number, or undefined
-    const opts = (typeof options === "object" && options !== null) ? options : {};
+    // Node's lookup can be called with 2 or 3 args; normalize
+    const cb = (typeof options === "function" ? options : callback) as (...args: unknown[]) => void;
+    const opts = (typeof options === "object" && options !== null) ? options as { all?: boolean } : {};
     if (opts.all) {
-      callback(null, [{ address: resolvedIP, family }]);
+      cb(null, [{ address: resolvedIP, family }]);
     } else {
-      callback(null, resolvedIP, family);
+      cb(null, resolvedIP, family);
     }
-  };
+  }) as LookupFunction;
 }
 
 /**
@@ -336,10 +214,10 @@ function pinnedRequest(
       {
         method: "GET",
         timeout,
-        lookup: createPinnedLookup(resolvedIP) as any,
+        lookup: createPinnedLookup(resolvedIP),
         headers: {
           "User-Agent":
-            "Mozilla/5.0 (compatible; markitdown/0.1; +https://github.com/user/markitdown)",
+            "Mozilla/5.0 (compatible; web-to-markdown/0.1; +https://github.com/nidhi-singh02/mark-it-down)",
           Accept:
             "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
           "Accept-Language": "en-US,en;q=0.5",
@@ -354,7 +232,7 @@ function pinnedRequest(
           if (totalBytes > MAX_RESPONSE_SIZE) {
             req.destroy();
             reject(
-              new Error(
+              new ContentError(
                 `Response too large: exceeded ${(MAX_RESPONSE_SIZE / 1024 / 1024).toFixed(0)} MB limit.`
               )
             );
@@ -380,11 +258,11 @@ function pinnedRequest(
 
     req.on("timeout", () => {
       req.destroy();
-      reject(new Error("Request timed out."));
+      reject(new NetworkError("Request timed out."));
     });
 
     req.on("error", (err: Error) => {
-      reject(new Error(`Request failed: ${err.message}`));
+      reject(new NetworkError(`Request failed: ${err.message}`, undefined, { cause: err }));
     });
 
     req.end();
@@ -410,14 +288,14 @@ export async function fetchWithHttp(
   // Handle redirects manually to validate each hop
   if ([301, 302, 303, 307, 308].includes(response.status)) {
     if (remainingRedirects <= 0) {
-      throw new Error(
+      throw new NetworkError(
         `Too many redirects (exceeded ${MAX_REDIRECTS}). The URL may be in a redirect loop.`
       );
     }
     const location = response.headers["location"];
     const locationStr = typeof location === "string" ? location : undefined;
     if (!locationStr) {
-      throw new Error(`Redirect ${response.status} with no Location header.`);
+      throw new NetworkError(`Redirect ${response.status} with no Location header.`);
     }
     const redirectUrl = new URL(locationStr, url).toString();
     const redirectIP = await validateUrl(redirectUrl);
@@ -430,7 +308,7 @@ export async function fetchWithHttp(
   }
 
   if (response.status < 200 || response.status >= 300) {
-    throw new Error(`HTTP ${response.status} for the requested URL.`);
+    throw new NetworkError(`HTTP ${response.status} for the requested URL.`, response.status);
   }
 
   validateContentType(response.headers);
@@ -453,14 +331,21 @@ export async function fetchWithBrowser(
   timeout: number
 ): Promise<FetchResult> {
   const safTimeout = clampTimeout(timeout);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let playwright: any;
+
+  // Playwright is optional — define minimal structural types for the APIs we use
+  type PwRoute = { request(): { url(): string }; fulfill(opts: Record<string, unknown>): Promise<void>; abort(reason: string): Promise<void> };
+  type PwPage = { goto(url: string, opts: Record<string, unknown>): Promise<void>; waitForTimeout(ms: number): Promise<void>; content(): Promise<string>; url(): string };
+  type PwContext = { newPage(): Promise<PwPage>; route(pattern: string, handler: (route: PwRoute) => Promise<void>): Promise<void> };
+  type PwBrowser = { newContext(opts: Record<string, unknown>): Promise<PwContext>; close(): Promise<void> };
+  type PwModule = { chromium: { launch(opts: Record<string, unknown>): Promise<PwBrowser> } };
+
+  let playwright: PwModule;
 
   try {
     const mod = "playwright";
-    playwright = await import(/* @vite-ignore */ mod);
+    playwright = await import(/* @vite-ignore */ mod) as PwModule;
   } catch {
-    throw new Error(
+    throw new NetworkError(
       [
         "Playwright is required for browser mode but is not installed.",
         "",
@@ -497,7 +382,7 @@ export async function fetchWithBrowser(
     // client to prevent DNS rebinding on sub-resource hostnames. The initial
     // page load is pinned via --host-resolver-rules, but sub-resources to
     // different hostnames need per-request DNS pinning.
-    await context.route("**/*", async (route: any) => {
+    await context.route("**/*", async (route) => {
       const requestUrl = route.request().url();
       try {
         const subIP = await validateUrl(requestUrl);
@@ -507,7 +392,7 @@ export async function fetchWithBrowser(
         const subResponse = await pinnedRequest(requestUrl, subIP, safTimeout);
         await route.fulfill({
           status: subResponse.status,
-          headers: subResponse.headers as Record<string, string>,
+          headers: subResponse.headers,
           body: subResponse.bodyBuffer,
         });
       } catch {
@@ -526,7 +411,7 @@ export async function fetchWithBrowser(
     const html = await page.content();
 
     if (Buffer.byteLength(html, "utf-8") > MAX_RESPONSE_SIZE) {
-      throw new Error(
+      throw new ContentError(
         `Page content too large: exceeded ${(MAX_RESPONSE_SIZE / 1024 / 1024).toFixed(0)} MB limit.`
       );
     }
@@ -541,12 +426,23 @@ export async function fetchWithBrowser(
 
 /**
  * Fetch a page using either HTTP or headless browser.
+ *
  * Validates the URL for SSRF and resolves DNS once.
  * The resolved IP is pinned to the connection to prevent DNS rebinding.
+ *
+ * @param url - The URL to fetch.
+ * @param options - Fetch options.
+ * @param options.browser - If `true`, use Playwright headless browser for SPAs.
+ * @param options.timeout - Request timeout in milliseconds (clamped to 1–300 s).
+ * @returns The raw HTML and final URL after redirects.
+ * @throws {ValidationError} If the URL is invalid.
+ * @throws {SSRFError} If the URL targets a private/internal host.
+ * @throws {NetworkError} On timeout, DNS failure, or HTTP error.
+ * @throws {ContentError} If the response is too large or not HTML.
  */
 export async function fetchPage(
   url: string,
-  options: { browser: boolean; timeout: number }
+  options: Readonly<{ browser: boolean; timeout: number }>
 ): Promise<FetchResult> {
   const safTimeout = clampTimeout(options.timeout);
 

@@ -1,46 +1,46 @@
 export interface ConvertOptions {
   /** Force headless browser rendering (for SPAs). */
-  browser: boolean;
+  readonly browser: boolean;
   /** Convert full HTML without content extraction. */
-  raw: boolean;
+  readonly raw: boolean;
   /** Include YAML frontmatter with metadata. */
-  frontmatter: boolean;
+  readonly frontmatter: boolean;
   /** Strip images from output. */
-  noImages: boolean;
+  readonly noImages: boolean;
   /** Timeout in milliseconds for page loading. */
-  timeout: number;
+  readonly timeout: number;
   /** Output file path (undefined means stdout). */
-  output?: string;
+  readonly output?: string;
 }
 
 export interface FetchResult {
   /** The raw HTML string of the page. */
-  html: string;
+  readonly html: string;
   /** The final URL after any redirects. */
-  finalUrl: string;
+  readonly finalUrl: string;
 }
 
 export interface PageMetadata {
-  title: string | null;
-  byline: string | null;
-  excerpt: string | null;
-  siteName: string | null;
-  publishedTime: string | null;
-  lang: string | null;
+  readonly title: string | null;
+  readonly byline: string | null;
+  readonly excerpt: string | null;
+  readonly siteName: string | null;
+  readonly publishedTime: string | null;
+  readonly lang: string | null;
 }
 
 export interface ExtractResult {
   /** Cleaned HTML content (article body). */
-  content: string;
+  readonly content: string;
   /** Metadata about the page. */
-  metadata: PageMetadata;
+  readonly metadata: PageMetadata;
 }
 
 export interface ConvertResult {
   /** The Markdown output string. */
-  markdown: string;
+  readonly markdown: string;
   /** Metadata extracted from the page. */
-  metadata: PageMetadata;
+  readonly metadata: PageMetadata;
   /** Non-fatal warnings generated during conversion. */
-  warnings: string[];
+  readonly warnings: readonly string[];
 }
