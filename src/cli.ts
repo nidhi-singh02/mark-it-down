@@ -1,4 +1,4 @@
-import { resolve, dirname } from "node:path";
+import { resolve, dirname, sep } from "node:path";
 import { existsSync, lstatSync, readFileSync } from "node:fs";
 import { realpath, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
@@ -35,7 +35,7 @@ async function validateOutputPath(outputPath: string): Promise<string> {
   const cwd = process.cwd();
 
   // Ensure resolved path is strictly within CWD
-  if (!resolved.startsWith(cwd + "/") && resolved !== cwd) {
+  if (!resolved.startsWith(cwd + sep) && resolved !== cwd) {
     throw new Error(
       `Output path "${outputPath}" resolves outside the current directory.\n` +
         `Resolved to: ${resolved}\n` +
@@ -52,7 +52,7 @@ async function validateOutputPath(outputPath: string): Promise<string> {
       if (stat.isSymbolicLink()) {
         const realTarget = await realpath(checkPath);
         const realCwd = await realpath(cwd);
-        if (!realTarget.startsWith(realCwd + "/") && realTarget !== realCwd) {
+        if (!realTarget.startsWith(realCwd + sep) && realTarget !== realCwd) {
           throw new Error(
             `Output path "${outputPath}" follows a symlink outside the current directory.\n` +
               `Symlink "${checkPath}" points to "${realTarget}".\n` +
