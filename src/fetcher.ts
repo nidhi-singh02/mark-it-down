@@ -354,7 +354,9 @@ export async function fetchWithBrowser(
 
   // Pin DNS for the initial hostname and disable WebSockets at the Chromium level
   const parsed = new URL(url);
-  const hostResolverRule = `MAP ${parsed.hostname} ${resolvedIP}`;
+  // Chromium requires brackets around IPv6 literals in host-resolver-rules
+  const pinnedAddr = resolvedIP.includes(":") ? `[${resolvedIP}]` : resolvedIP;
+  const hostResolverRule = `MAP ${parsed.hostname} ${pinnedAddr}`;
 
   const browser = await playwright.chromium.launch({
     headless: true,
