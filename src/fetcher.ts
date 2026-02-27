@@ -424,19 +424,40 @@ export async function fetchWithBrowser(
     });
     const page = await context.newPage();
 
-    // Intercept sub-resource requests for SSRF validation. The initial page
-    // load is pinned via --host-resolver-rules. Sub-resources are validated
-    // (URL + DNS check) but fetched natively by Chromium so HTTP/2, cookies,
-    // compression, and redirect handling all work correctly for SPAs.
+    // Intercept sub-resource requests for SSRF validation.
+    // The initial page load is pinned via --host-resolver-rules.
+    // Sub-resources on the SAME hostname are also pinned by that rule.
+    // Cross-origin sub-resources are fetched through our pinned HTTP client
+    // to eliminate the TOCTOU gap between validateUrl() and Chromium's DNS.
+    const initialHostname = parsed.hostname;
     await context.route("**/*", async (route) => {
       const requestUrl = route.request().url();
       try {
-        const parsed = new URL(requestUrl);
+        const reqParsed = new URL(requestUrl);
         // Only validate http/https — skip data:, blob:, chrome: etc.
-        if (parsed.protocol === "http:" || parsed.protocol === "https:") {
-          await validateUrl(requestUrl);
+        if (reqParsed.protocol !== "http:" && reqParsed.protocol !== "https:") {
+          await route.continue();
+          return;
         }
-        await route.continue();
+
+        const subResolvedIP = await validateUrl(requestUrl);
+
+        // Same hostname as initial page — already pinned by --host-resolver-rules
+        if (reqParsed.hostname === initialHostname) {
+          await route.continue();
+          return;
+        }
+
+        // Cross-origin: fetch through our DNS-pinned HTTP client to close TOCTOU
+        const response = await pinnedRequest(requestUrl, subResolvedIP, safTimeout);
+        const contentType = typeof response.headers["content-type"] === "string"
+          ? response.headers["content-type"]
+          : "application/octet-stream";
+        await route.fulfill({
+          status: response.status,
+          contentType,
+          body: response.bodyBuffer,
+        });
       } catch {
         await route.abort("blockedbyclient");
       }
