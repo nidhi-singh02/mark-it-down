@@ -43,22 +43,20 @@ async function validateOutputPath(outputPath: string): Promise<string> {
     );
   }
 
-  // Walk up from the target to CWD, checking for symlinks that escape CWD
+  // Walk up from the target to CWD, checking for links that escape CWD.
+  // Use realpath unconditionally on existing components — isSymbolicLink()
+  // misses NTFS junctions and other reparse points on Windows.
   let checkPath = resolved;
   while (checkPath !== cwd && checkPath !== dirname(checkPath)) {
     if (existsSync(checkPath)) {
-      // Reject if the existing component is a symlink
-      const stat = lstatSync(checkPath);
-      if (stat.isSymbolicLink()) {
-        const realTarget = await realpath(checkPath);
-        const realCwd = await realpath(cwd);
-        if (!realTarget.startsWith(realCwd + sep) && realTarget !== realCwd) {
-          throw new Error(
-            `Output path "${outputPath}" follows a symlink outside the current directory.\n` +
-              `Symlink "${checkPath}" points to "${realTarget}".\n` +
-              "For safety, output files must not escape the working directory via symlinks."
-          );
-        }
+      const realTarget = await realpath(checkPath);
+      const realCwd = await realpath(cwd);
+      if (!realTarget.startsWith(realCwd + sep) && realTarget !== realCwd) {
+        throw new Error(
+          `Output path "${outputPath}" resolves outside the current directory.\n` +
+            `"${checkPath}" resolves to "${realTarget}".\n` +
+            "For safety, output files must not escape the working directory via symlinks or junctions."
+        );
       }
       break;
     }
