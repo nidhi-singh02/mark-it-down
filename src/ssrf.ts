@@ -82,7 +82,9 @@ export function normalizeIP(hostname: string): string | null {
     }
 
     const fullFfmpHex = expandIPv6(bare);
-    const fullFfmpMatch = fullFfmpHex.match(/^0000:0000:0000:0000:0000:ffff:([0-9a-f]{4}):([0-9a-f]{4})$/i);
+    const fullFfmpMatch = fullFfmpHex.match(
+      /^0000:0000:0000:0000:0000:ffff:([0-9a-f]{4}):([0-9a-f]{4})$/i
+    );
     if (fullFfmpMatch) {
       const high = parseInt(fullFfmpMatch[1], 16);
       const low = parseInt(fullFfmpMatch[2], 16);
@@ -159,9 +161,12 @@ export function isPrivateIP(ip: string): boolean {
   if (ip.startsWith("203.0.113.")) return true;
   if (/^198\.(18|19)\./.test(ip)) return true;
 
-  // Multicast (224-239) and Class E reserved (240-255) — covers the full range
-  const firstOctet = parseInt(ip.split(".")[0], 10);
-  if (firstOctet >= 224) return true;
+  // Multicast (224-239) and Class E reserved (240-255) — covers the full range.
+  // Guard: only apply to dotted-decimal IPv4 (contains "." but no ":").
+  if (ip.includes(".") && !ip.includes(":")) {
+    const firstOctet = parseInt(ip.split(".")[0], 10);
+    if (firstOctet >= 224) return true;
+  }
 
   const expanded = ip.includes("::") ? expandIPv6(ip) : ip.toLowerCase();
 

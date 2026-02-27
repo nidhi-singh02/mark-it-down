@@ -29,6 +29,8 @@ const BLOCKED_HOSTNAME_SUFFIXES = [
   ".internal",
   ".local",
   ".localhost",
+  ".localdomain",
+  ".intranet",
   ".corp",
   ".home",
   ".lan",
@@ -111,7 +113,9 @@ export async function validateUrl(url: string): Promise<string> {
     );
   }
 
-  const hostname = parsed.hostname.toLowerCase();
+  // Strip trailing dot (FQDN indicator) so suffix checks aren't bypassed
+  // by URLs like http://host.corp. where endsWith(".corp") would fail.
+  const hostname = parsed.hostname.toLowerCase().replace(/\.$/, "");
 
   if (BLOCKED_HOSTNAMES.has(hostname)) {
     throw new SSRFError(
@@ -139,7 +143,7 @@ export async function validateUrl(url: string): Promise<string> {
 function extractCharset(headers: Record<string, string | string[] | undefined>): string | null {
   const raw = headers["content-type"];
   const contentType = typeof raw === "string" ? raw : "";
-  const match = contentType.match(/charset\s*=\s*"?([^";,\s]+)"?/i);
+  const match = contentType.match(/charset\s*=\s*["']?([^"';,\s]+)["']?/i);
   return match ? match[1].toLowerCase() : null;
 }
 
@@ -412,9 +416,22 @@ export async function fetchWithBrowser(
   const pinnedAddr = resolvedIP.includes(":") ? `[${resolvedIP}]` : resolvedIP;
   const hostResolverRule = `MAP ${parsed.hostname} ${pinnedAddr}`;
 
+  const chromiumArgs = [
+    "--disable-features=WebSockets",
+    `--host-resolver-rules=${hostResolverRule}`,
+    // Avoid /dev/shm exhaustion in Docker containers (default 64MB)
+    "--disable-dev-shm-usage",
+  ];
+  // Chromium's sandbox requires unprivileged user namespaces, which are
+  // unavailable when running as root (common in Docker/CI). Without this
+  // flag the browser crashes with "No usable sandbox!".
+  if (process.platform === "linux" && process.getuid?.() === 0) {
+    chromiumArgs.push("--no-sandbox");
+  }
+
   const browser = await playwright.chromium.launch({
     headless: true,
-    args: ["--disable-websockets", `--host-resolver-rules=${hostResolverRule}`],
+    args: chromiumArgs,
   });
 
   try {
@@ -450,9 +467,10 @@ export async function fetchWithBrowser(
 
         // Cross-origin: fetch through our DNS-pinned HTTP client to close TOCTOU
         const response = await pinnedRequest(requestUrl, subResolvedIP, safTimeout);
-        const contentType = typeof response.headers["content-type"] === "string"
-          ? response.headers["content-type"]
-          : "application/octet-stream";
+        const contentType =
+          typeof response.headers["content-type"] === "string"
+            ? response.headers["content-type"]
+            : "application/octet-stream";
         await route.fulfill({
           status: response.status,
           contentType,
@@ -481,7 +499,11 @@ export async function fetchWithBrowser(
 
     return { html, finalUrl: page.url() };
   } finally {
-    await browser.close();
+    try {
+      await browser.close();
+    } catch {
+      // Swallow — browser may have already crashed; don't mask the real error
+    }
   }
 }
 

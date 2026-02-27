@@ -37,7 +37,8 @@ export function extractMdx(html: string, url: string): MdxExtractResult | null {
  * Used for processing .md endpoint responses and raw MDX from RSC chunks.
  */
 export function processRawMdx(mdx: string, url: string): MdxExtractResult {
-  const { body, metadata } = parseFrontmatter(mdx);
+  // Normalize CRLF to LF so regexes using \n work on Windows-originated content
+  const { body, metadata } = parseFrontmatter(mdx.replace(/\r\n/g, "\n"));
   let markdown = stripMdxComponents(body);
   markdown = resolveRelativeUrls(markdown, url);
   markdown = markdown.replace(/\n{3,}/g, "\n\n");

@@ -1,5 +1,5 @@
 import { resolve, dirname, sep } from "node:path";
-import { existsSync, lstatSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { realpath, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { Command } from "commander";
@@ -34,8 +34,12 @@ async function validateOutputPath(outputPath: string): Promise<string> {
   const resolved = resolve(outputPath);
   const cwd = process.cwd();
 
+  // Build prefix avoiding double-separator when CWD is the filesystem root
+  // (e.g. "/" on Linux/macOS or "C:\" on Windows).
+  const cwdPrefix = cwd.endsWith(sep) ? cwd : cwd + sep;
+
   // Ensure resolved path is strictly within CWD
-  if (!resolved.startsWith(cwd + sep) && resolved !== cwd) {
+  if (!resolved.startsWith(cwdPrefix) && resolved !== cwd) {
     throw new Error(
       `Output path "${outputPath}" resolves outside the current directory.\n` +
         `Resolved to: ${resolved}\n` +
@@ -51,7 +55,8 @@ async function validateOutputPath(outputPath: string): Promise<string> {
     if (existsSync(checkPath)) {
       const realTarget = await realpath(checkPath);
       const realCwd = await realpath(cwd);
-      if (!realTarget.startsWith(realCwd + sep) && realTarget !== realCwd) {
+      const realCwdPrefix = realCwd.endsWith(sep) ? realCwd : realCwd + sep;
+      if (!realTarget.startsWith(realCwdPrefix) && realTarget !== realCwd) {
         throw new Error(
           `Output path "${outputPath}" resolves outside the current directory.\n` +
             `"${checkPath}" resolves to "${realTarget}".\n` +

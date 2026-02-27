@@ -130,6 +130,13 @@ describe("isPrivateIP", () => {
     expect(isPrivateIP("0000:0000:0000:0000:0000:0000:0000:00fc")).toBe(false);
   });
 
+  it("does not false-positive on public IPv6 addresses", () => {
+    // Global unicast IPv6 — must NOT be blocked by the IPv4 multicast/Class E check
+    expect(isPrivateIP("2606:4700::1")).toBe(false); // Cloudflare
+    expect(isPrivateIP("2a00:1450:4001:802::200e")).toBe(false); // Google
+    expect(isPrivateIP("2607:f8b0:4004:800::200e")).toBe(false); // Google
+  });
+
   it("detects IPv6 link-local (fe80::/10)", () => {
     expect(isPrivateIP("fe80::1")).toBe(true);
   });
@@ -206,6 +213,15 @@ describe("validateUrl", () => {
     await expect(validateUrl("http://server.corp")).rejects.toThrow("Blocked");
     await expect(validateUrl("http://router.home")).rejects.toThrow("Blocked");
     await expect(validateUrl("http://nas.lan")).rejects.toThrow("Blocked");
+    await expect(validateUrl("http://host.localdomain")).rejects.toThrow("Blocked");
+    await expect(validateUrl("http://portal.intranet")).rejects.toThrow("Blocked");
+  });
+
+  it("rejects trailing-dot FQDN forms of blocked hostnames", async () => {
+    await expect(validateUrl("http://app.internal.")).rejects.toThrow("Blocked");
+    await expect(validateUrl("http://myhost.local.")).rejects.toThrow("Blocked");
+    await expect(validateUrl("http://localhost.")).rejects.toThrow("Blocked");
+    await expect(validateUrl("http://server.corp.")).rejects.toThrow("Blocked");
   });
 
   it("rejects private IP addresses", async () => {
