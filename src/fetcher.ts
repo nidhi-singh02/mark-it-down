@@ -130,7 +130,32 @@ export async function validateUrl(url: string): Promise<string> {
   return resolveAndValidateHostname(hostname);
 }
 
-// ─── Content-Type Validation ─────────────────────────────────────────────────
+// ─── Content-Type Helpers ────────────────────────────────────────────────────
+
+/**
+ * Extract the charset from a Content-Type header value.
+ * Returns the charset label (e.g., "utf-8", "iso-8859-1") or null if absent.
+ */
+function extractCharset(headers: Record<string, string | string[] | undefined>): string | null {
+  const raw = headers["content-type"];
+  const contentType = typeof raw === "string" ? raw : "";
+  const match = contentType.match(/charset\s*=\s*"?([^";,\s]+)"?/i);
+  return match ? match[1].toLowerCase() : null;
+}
+
+/**
+ * Decode a Buffer using the charset from the Content-Type header.
+ * Falls back to UTF-8 if the charset is absent or unsupported.
+ */
+function decodeBody(buffer: Buffer, charset: string | null): string {
+  const encoding = charset || "utf-8";
+  try {
+    return new TextDecoder(encoding).decode(buffer);
+  } catch {
+    // Unsupported encoding — fall back to UTF-8
+    return buffer.toString("utf-8");
+  }
+}
 
 const HTML_CONTENT_TYPES = [
   "text/html",
@@ -243,10 +268,12 @@ function pinnedRequest(url: string, resolvedIP: string, timeout: number): Promis
         res.on("end", () => {
           clearTimeout(totalTimer);
           const bodyBuffer = Buffer.concat(chunks);
+          const responseHeaders = res.headers as Record<string, string | string[] | undefined>;
+          const charset = extractCharset(responseHeaders);
           resolve({
             status: res.statusCode || 0,
-            headers: res.headers as Record<string, string | string[] | undefined>,
-            body: bodyBuffer.toString("utf-8"),
+            headers: responseHeaders,
+            body: decodeBody(bodyBuffer, charset),
             bodyBuffer,
             responseUrl: url,
           });
