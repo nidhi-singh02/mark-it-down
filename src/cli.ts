@@ -143,5 +143,11 @@ export async function run(): Promise<void> {
   process.on("SIGINT", onSignal);
   process.on("SIGTERM", onSignal);
 
+  // Windows: SIGTERM is not delivered by Task Manager or taskkill.
+  // SIGBREAK (Ctrl+Break) is the closest equivalent for graceful shutdown.
+  if (process.platform === "win32") {
+    process.on("SIGBREAK", onSignal);
+  }
+
   await program.parseAsync(process.argv);
 }
