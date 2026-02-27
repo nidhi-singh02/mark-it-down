@@ -53,14 +53,23 @@ async function resolveAndValidateHostname(hostname: string): Promise<string> {
   }
 
   try {
-    const { address } = await lookup(hostname);
-    if (isPrivateIP(address)) {
-      throw new SSRFError(
-        `Blocked request to "${hostname}" — resolves to private IP. ` +
-          "Requests to internal networks are not allowed."
-      );
+    // Resolve ALL addresses (IPv4 + IPv6) so a private IP on either family
+    // cannot hide behind a public IP on the other. OS-specific resolver
+    // ordering (macOS prefers IPv6, Windows prefers IPv4) no longer matters.
+    const results = await lookup(hostname, { all: true });
+    if (results.length === 0) {
+      throw new NetworkError(`DNS lookup for "${hostname}" returned no results. Check the URL.`);
     }
-    return address;
+    for (const { address } of results) {
+      if (isPrivateIP(address)) {
+        throw new SSRFError(
+          `Blocked request to "${hostname}" — resolves to private IP. ` +
+            "Requests to internal networks are not allowed."
+        );
+      }
+    }
+    // Return first result for connection pinning
+    return results[0].address;
   } catch (err: unknown) {
     if (err instanceof SSRFError) throw err;
     if (err instanceof Error) {
