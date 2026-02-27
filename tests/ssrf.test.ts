@@ -22,11 +22,11 @@ describe("normalizeIP", () => {
   });
 
   it("strips brackets from IPv6", () => {
-    expect(normalizeIP("[::1]")).toBe("0:0:0:0:0:0:0:1");
+    expect(normalizeIP("[::1]")).toBe("0000:0000:0000:0000:0000:0000:0000:0001");
   });
 
-  it("expands abbreviated IPv6", () => {
-    expect(normalizeIP("::1")).toBe("0:0:0:0:0:0:0:1");
+  it("expands abbreviated IPv6 with zero-padded groups", () => {
+    expect(normalizeIP("::1")).toBe("0000:0000:0000:0000:0000:0000:0000:0001");
   });
 
   it("converts IPv6-mapped IPv4 (dotted) to IPv4", () => {
@@ -47,6 +47,15 @@ describe("normalizeIP", () => {
 
   it("converts NAT64 (hex) to IPv4", () => {
     expect(normalizeIP("64:ff9b::0a00:0001")).toBe("10.0.0.1");
+  });
+
+  it("strips IPv6 zone IDs before normalization", () => {
+    // Linux-style zone ID
+    expect(normalizeIP("fe80::1%eth0")).toBe("fe80:0000:0000:0000:0000:0000:0000:0001");
+    // macOS-style zone ID
+    expect(normalizeIP("[fe80::1%en0]")).toBe("fe80:0000:0000:0000:0000:0000:0000:0001");
+    // Windows-style numeric zone ID
+    expect(normalizeIP("fe80::1%12")).toBe("fe80:0000:0000:0000:0000:0000:0000:0001");
   });
 
   it("returns null for non-IP hostnames", () => {
@@ -80,7 +89,12 @@ describe("isPrivateIP", () => {
     ["198.51.100.1", "TEST-NET-2"],
     ["203.0.113.1", "TEST-NET-3"],
     ["198.18.0.1", "benchmarking"],
+    ["224.0.0.1", "multicast"],
+    ["239.255.255.255", "multicast end"],
     ["240.0.0.1", "reserved class E"],
+    ["250.0.0.1", "reserved class E mid-range"],
+    ["254.0.0.1", "reserved class E near-end"],
+    ["255.255.255.255", "broadcast"],
   ])("returns true for %s (%s)", (ip) => {
     expect(isPrivateIP(ip)).toBe(true);
   });
@@ -108,6 +122,19 @@ describe("isPrivateIP", () => {
   it("detects IPv6 ULA (fc00::/7)", () => {
     expect(isPrivateIP("fc00::1")).toBe(true);
     expect(isPrivateIP("fd12:3456::1")).toBe(true);
+  });
+
+  it("does not false-positive on unallocated ranges resembling ULA/multicast", () => {
+    // 00fc::1 is NOT in fc00::/7 — the first group 00fc != fc00
+    // These are currently unallocated but should not be blocked as private
+    expect(isPrivateIP("0000:0000:0000:0000:0000:0000:0000:00fc")).toBe(false);
+  });
+
+  it("does not false-positive on public IPv6 addresses", () => {
+    // Global unicast IPv6 — must NOT be blocked by the IPv4 multicast/Class E check
+    expect(isPrivateIP("2606:4700::1")).toBe(false); // Cloudflare
+    expect(isPrivateIP("2a00:1450:4001:802::200e")).toBe(false); // Google
+    expect(isPrivateIP("2607:f8b0:4004:800::200e")).toBe(false); // Google
   });
 
   it("detects IPv6 link-local (fe80::/10)", () => {
@@ -186,6 +213,15 @@ describe("validateUrl", () => {
     await expect(validateUrl("http://server.corp")).rejects.toThrow("Blocked");
     await expect(validateUrl("http://router.home")).rejects.toThrow("Blocked");
     await expect(validateUrl("http://nas.lan")).rejects.toThrow("Blocked");
+    await expect(validateUrl("http://host.localdomain")).rejects.toThrow("Blocked");
+    await expect(validateUrl("http://portal.intranet")).rejects.toThrow("Blocked");
+  });
+
+  it("rejects trailing-dot FQDN forms of blocked hostnames", async () => {
+    await expect(validateUrl("http://app.internal.")).rejects.toThrow("Blocked");
+    await expect(validateUrl("http://myhost.local.")).rejects.toThrow("Blocked");
+    await expect(validateUrl("http://localhost.")).rejects.toThrow("Blocked");
+    await expect(validateUrl("http://server.corp.")).rejects.toThrow("Blocked");
   });
 
   it("rejects private IP addresses", async () => {

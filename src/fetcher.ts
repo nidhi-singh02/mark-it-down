@@ -29,6 +29,8 @@ const BLOCKED_HOSTNAME_SUFFIXES = [
   ".internal",
   ".local",
   ".localhost",
+  ".localdomain",
+  ".intranet",
   ".corp",
   ".home",
   ".lan",
@@ -53,14 +55,23 @@ async function resolveAndValidateHostname(hostname: string): Promise<string> {
   }
 
   try {
-    const { address } = await lookup(hostname);
-    if (isPrivateIP(address)) {
-      throw new SSRFError(
-        `Blocked request to "${hostname}" — resolves to private IP. ` +
-          "Requests to internal networks are not allowed."
-      );
+    // Resolve ALL addresses (IPv4 + IPv6) so a private IP on either family
+    // cannot hide behind a public IP on the other. OS-specific resolver
+    // ordering (macOS prefers IPv6, Windows prefers IPv4) no longer matters.
+    const results = await lookup(hostname, { all: true });
+    if (results.length === 0) {
+      throw new NetworkError(`DNS lookup for "${hostname}" returned no results. Check the URL.`);
     }
-    return address;
+    for (const { address } of results) {
+      if (isPrivateIP(address)) {
+        throw new SSRFError(
+          `Blocked request to "${hostname}" — resolves to private IP. ` +
+            "Requests to internal networks are not allowed."
+        );
+      }
+    }
+    // Return first result for connection pinning
+    return results[0].address;
   } catch (err: unknown) {
     if (err instanceof SSRFError) throw err;
     if (err instanceof Error) {
@@ -102,7 +113,9 @@ export async function validateUrl(url: string): Promise<string> {
     );
   }
 
-  const hostname = parsed.hostname.toLowerCase();
+  // Strip trailing dot (FQDN indicator) so suffix checks aren't bypassed
+  // by URLs like http://host.corp. where endsWith(".corp") would fail.
+  const hostname = parsed.hostname.toLowerCase().replace(/\.$/, "");
 
   if (BLOCKED_HOSTNAMES.has(hostname)) {
     throw new SSRFError(
@@ -121,7 +134,32 @@ export async function validateUrl(url: string): Promise<string> {
   return resolveAndValidateHostname(hostname);
 }
 
-// ─── Content-Type Validation ─────────────────────────────────────────────────
+// ─── Content-Type Helpers ────────────────────────────────────────────────────
+
+/**
+ * Extract the charset from a Content-Type header value.
+ * Returns the charset label (e.g., "utf-8", "iso-8859-1") or null if absent.
+ */
+function extractCharset(headers: Record<string, string | string[] | undefined>): string | null {
+  const raw = headers["content-type"];
+  const contentType = typeof raw === "string" ? raw : "";
+  const match = contentType.match(/charset\s*=\s*["']?([^"';,\s]+)["']?/i);
+  return match ? match[1].toLowerCase() : null;
+}
+
+/**
+ * Decode a Buffer using the charset from the Content-Type header.
+ * Falls back to UTF-8 if the charset is absent or unsupported.
+ */
+function decodeBody(buffer: Buffer, charset: string | null): string {
+  const encoding = charset || "utf-8";
+  try {
+    return new TextDecoder(encoding).decode(buffer);
+  } catch {
+    // Unsupported encoding — fall back to UTF-8
+    return buffer.toString("utf-8");
+  }
+}
 
 const HTML_CONTENT_TYPES = [
   "text/html",
@@ -192,11 +230,18 @@ function pinnedRequest(url: string, resolvedIP: string, timeout: number): Promis
     const isHttps = parsed.protocol === "https:";
     const requestFn = isHttps ? httpsRequest : httpRequest;
 
+    // Hard total-request deadline — prevents slow-drip attacks where a
+    // malicious server sends 1 byte per (idle_timeout - 1)ms to keep
+    // resetting the socket idle timer indefinitely.
+    const abortController = new AbortController();
+    const totalTimer = setTimeout(() => abortController.abort(), timeout);
+
     const req = requestFn(
       url,
       {
         method: "GET",
         timeout,
+        signal: abortController.signal,
         lookup: createPinnedLookup(resolvedIP),
         headers: {
           "User-Agent":
@@ -212,6 +257,7 @@ function pinnedRequest(url: string, resolvedIP: string, timeout: number): Promis
         res.on("data", (chunk: Buffer) => {
           totalBytes += chunk.length;
           if (totalBytes > MAX_RESPONSE_SIZE) {
+            clearTimeout(totalTimer);
             req.destroy();
             reject(
               new ContentError(
@@ -224,27 +270,39 @@ function pinnedRequest(url: string, resolvedIP: string, timeout: number): Promis
         });
 
         res.on("end", () => {
+          clearTimeout(totalTimer);
           const bodyBuffer = Buffer.concat(chunks);
+          const responseHeaders = res.headers as Record<string, string | string[] | undefined>;
+          const charset = extractCharset(responseHeaders);
           resolve({
             status: res.statusCode || 0,
-            headers: res.headers as Record<string, string | string[] | undefined>,
-            body: bodyBuffer.toString("utf-8"),
+            headers: responseHeaders,
+            body: decodeBody(bodyBuffer, charset),
             bodyBuffer,
             responseUrl: url,
           });
         });
 
-        res.on("error", reject);
+        res.on("error", (err) => {
+          clearTimeout(totalTimer);
+          reject(err);
+        });
       }
     );
 
     req.on("timeout", () => {
+      clearTimeout(totalTimer);
       req.destroy();
       reject(new NetworkError("Request timed out."));
     });
 
     req.on("error", (err: Error) => {
-      reject(new NetworkError(`Request failed: ${err.message}`, undefined, { cause: err }));
+      clearTimeout(totalTimer);
+      if (abortController.signal.aborted) {
+        reject(new NetworkError("Request timed out (total deadline exceeded)."));
+      } else {
+        reject(new NetworkError(`Request failed: ${err.message}`, undefined, { cause: err }));
+      }
     });
 
     req.end();
@@ -354,11 +412,26 @@ export async function fetchWithBrowser(
 
   // Pin DNS for the initial hostname and disable WebSockets at the Chromium level
   const parsed = new URL(url);
-  const hostResolverRule = `MAP ${parsed.hostname} ${resolvedIP}`;
+  // Chromium requires brackets around IPv6 literals in host-resolver-rules
+  const pinnedAddr = resolvedIP.includes(":") ? `[${resolvedIP}]` : resolvedIP;
+  const hostResolverRule = `MAP ${parsed.hostname} ${pinnedAddr}`;
+
+  const chromiumArgs = [
+    "--disable-features=WebSockets",
+    `--host-resolver-rules=${hostResolverRule}`,
+    // Avoid /dev/shm exhaustion in Docker containers (default 64MB)
+    "--disable-dev-shm-usage",
+  ];
+  // Chromium's sandbox requires unprivileged user namespaces, which are
+  // unavailable when running as root (common in Docker/CI). Without this
+  // flag the browser crashes with "No usable sandbox!".
+  if (process.platform === "linux" && process.getuid?.() === 0) {
+    chromiumArgs.push("--no-sandbox");
+  }
 
   const browser = await playwright.chromium.launch({
     headless: true,
-    args: ["--disable-websockets", `--host-resolver-rules=${hostResolverRule}`],
+    args: chromiumArgs,
   });
 
   try {
@@ -368,19 +441,41 @@ export async function fetchWithBrowser(
     });
     const page = await context.newPage();
 
-    // Intercept sub-resource requests for SSRF validation. The initial page
-    // load is pinned via --host-resolver-rules. Sub-resources are validated
-    // (URL + DNS check) but fetched natively by Chromium so HTTP/2, cookies,
-    // compression, and redirect handling all work correctly for SPAs.
+    // Intercept sub-resource requests for SSRF validation.
+    // The initial page load is pinned via --host-resolver-rules.
+    // Sub-resources on the SAME hostname are also pinned by that rule.
+    // Cross-origin sub-resources are fetched through our pinned HTTP client
+    // to eliminate the TOCTOU gap between validateUrl() and Chromium's DNS.
+    const initialHostname = parsed.hostname;
     await context.route("**/*", async (route) => {
       const requestUrl = route.request().url();
       try {
-        const parsed = new URL(requestUrl);
+        const reqParsed = new URL(requestUrl);
         // Only validate http/https — skip data:, blob:, chrome: etc.
-        if (parsed.protocol === "http:" || parsed.protocol === "https:") {
-          await validateUrl(requestUrl);
+        if (reqParsed.protocol !== "http:" && reqParsed.protocol !== "https:") {
+          await route.continue();
+          return;
         }
-        await route.continue();
+
+        const subResolvedIP = await validateUrl(requestUrl);
+
+        // Same hostname as initial page — already pinned by --host-resolver-rules
+        if (reqParsed.hostname === initialHostname) {
+          await route.continue();
+          return;
+        }
+
+        // Cross-origin: fetch through our DNS-pinned HTTP client to close TOCTOU
+        const response = await pinnedRequest(requestUrl, subResolvedIP, safTimeout);
+        const contentType =
+          typeof response.headers["content-type"] === "string"
+            ? response.headers["content-type"]
+            : "application/octet-stream";
+        await route.fulfill({
+          status: response.status,
+          contentType,
+          body: response.bodyBuffer,
+        });
       } catch {
         await route.abort("blockedbyclient");
       }
@@ -404,7 +499,11 @@ export async function fetchWithBrowser(
 
     return { html, finalUrl: page.url() };
   } finally {
-    await browser.close();
+    try {
+      await browser.close();
+    } catch {
+      // Swallow — browser may have already crashed; don't mask the real error
+    }
   }
 }
 

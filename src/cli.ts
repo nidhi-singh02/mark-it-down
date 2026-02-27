@@ -1,5 +1,5 @@
-import { resolve, dirname } from "node:path";
-import { existsSync, lstatSync, readFileSync } from "node:fs";
+import { resolve, dirname, sep } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
 import { realpath, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { Command } from "commander";
@@ -34,8 +34,12 @@ async function validateOutputPath(outputPath: string): Promise<string> {
   const resolved = resolve(outputPath);
   const cwd = process.cwd();
 
+  // Build prefix avoiding double-separator when CWD is the filesystem root
+  // (e.g. "/" on Linux/macOS or "C:\" on Windows).
+  const cwdPrefix = cwd.endsWith(sep) ? cwd : cwd + sep;
+
   // Ensure resolved path is strictly within CWD
-  if (!resolved.startsWith(cwd + "/") && resolved !== cwd) {
+  if (!resolved.startsWith(cwdPrefix) && resolved !== cwd) {
     throw new Error(
       `Output path "${outputPath}" resolves outside the current directory.\n` +
         `Resolved to: ${resolved}\n` +
@@ -43,22 +47,21 @@ async function validateOutputPath(outputPath: string): Promise<string> {
     );
   }
 
-  // Walk up from the target to CWD, checking for symlinks that escape CWD
+  // Walk up from the target to CWD, checking for links that escape CWD.
+  // Use realpath unconditionally on existing components — isSymbolicLink()
+  // misses NTFS junctions and other reparse points on Windows.
   let checkPath = resolved;
   while (checkPath !== cwd && checkPath !== dirname(checkPath)) {
     if (existsSync(checkPath)) {
-      // Reject if the existing component is a symlink
-      const stat = lstatSync(checkPath);
-      if (stat.isSymbolicLink()) {
-        const realTarget = await realpath(checkPath);
-        const realCwd = await realpath(cwd);
-        if (!realTarget.startsWith(realCwd + "/") && realTarget !== realCwd) {
-          throw new Error(
-            `Output path "${outputPath}" follows a symlink outside the current directory.\n` +
-              `Symlink "${checkPath}" points to "${realTarget}".\n` +
-              "For safety, output files must not escape the working directory via symlinks."
-          );
-        }
+      const realTarget = await realpath(checkPath);
+      const realCwd = await realpath(cwd);
+      const realCwdPrefix = realCwd.endsWith(sep) ? realCwd : realCwd + sep;
+      if (!realTarget.startsWith(realCwdPrefix) && realTarget !== realCwd) {
+        throw new Error(
+          `Output path "${outputPath}" resolves outside the current directory.\n` +
+            `"${checkPath}" resolves to "${realTarget}".\n` +
+            "For safety, output files must not escape the working directory via symlinks or junctions."
+        );
       }
       break;
     }
@@ -144,6 +147,12 @@ export async function run(): Promise<void> {
   };
   process.on("SIGINT", onSignal);
   process.on("SIGTERM", onSignal);
+
+  // Windows: SIGTERM is not delivered by Task Manager or taskkill.
+  // SIGBREAK (Ctrl+Break) is the closest equivalent for graceful shutdown.
+  if (process.platform === "win32") {
+    process.on("SIGBREAK", onSignal);
+  }
 
   await program.parseAsync(process.argv);
 }
