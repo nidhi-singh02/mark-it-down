@@ -22,11 +22,11 @@ describe("normalizeIP", () => {
   });
 
   it("strips brackets from IPv6", () => {
-    expect(normalizeIP("[::1]")).toBe("0:0:0:0:0:0:0:1");
+    expect(normalizeIP("[::1]")).toBe("0000:0000:0000:0000:0000:0000:0000:0001");
   });
 
-  it("expands abbreviated IPv6", () => {
-    expect(normalizeIP("::1")).toBe("0:0:0:0:0:0:0:1");
+  it("expands abbreviated IPv6 with zero-padded groups", () => {
+    expect(normalizeIP("::1")).toBe("0000:0000:0000:0000:0000:0000:0000:0001");
   });
 
   it("converts IPv6-mapped IPv4 (dotted) to IPv4", () => {
@@ -51,11 +51,11 @@ describe("normalizeIP", () => {
 
   it("strips IPv6 zone IDs before normalization", () => {
     // Linux-style zone ID
-    expect(normalizeIP("fe80::1%eth0")).toBe("fe80:0:0:0:0:0:0:1");
+    expect(normalizeIP("fe80::1%eth0")).toBe("fe80:0000:0000:0000:0000:0000:0000:0001");
     // macOS-style zone ID
-    expect(normalizeIP("[fe80::1%en0]")).toBe("fe80:0:0:0:0:0:0:1");
+    expect(normalizeIP("[fe80::1%en0]")).toBe("fe80:0000:0000:0000:0000:0000:0000:0001");
     // Windows-style numeric zone ID
-    expect(normalizeIP("fe80::1%12")).toBe("fe80:0:0:0:0:0:0:1");
+    expect(normalizeIP("fe80::1%12")).toBe("fe80:0000:0000:0000:0000:0000:0000:0001");
   });
 
   it("returns null for non-IP hostnames", () => {
@@ -122,6 +122,12 @@ describe("isPrivateIP", () => {
   it("detects IPv6 ULA (fc00::/7)", () => {
     expect(isPrivateIP("fc00::1")).toBe(true);
     expect(isPrivateIP("fd12:3456::1")).toBe(true);
+  });
+
+  it("does not false-positive on unallocated ranges resembling ULA/multicast", () => {
+    // 00fc::1 is NOT in fc00::/7 — the first group 00fc != fc00
+    // These are currently unallocated but should not be blocked as private
+    expect(isPrivateIP("0000:0000:0000:0000:0000:0000:0000:00fc")).toBe(false);
   });
 
   it("detects IPv6 link-local (fe80::/10)", () => {

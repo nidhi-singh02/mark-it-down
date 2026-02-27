@@ -49,7 +49,7 @@ function expandIPv6(ip: string): string {
     groups = ip.split(":");
   }
 
-  return groups.map((g) => g.toLowerCase()).join(":");
+  return groups.map((g) => g.toLowerCase().padStart(4, "0")).join(":");
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────
@@ -82,7 +82,7 @@ export function normalizeIP(hostname: string): string | null {
     }
 
     const fullFfmpHex = expandIPv6(bare);
-    const fullFfmpMatch = fullFfmpHex.match(/^0:0:0:0:0:ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/i);
+    const fullFfmpMatch = fullFfmpHex.match(/^0000:0000:0000:0000:0000:ffff:([0-9a-f]{4}):([0-9a-f]{4})$/i);
     if (fullFfmpMatch) {
       const high = parseInt(fullFfmpMatch[1], 16);
       const low = parseInt(fullFfmpMatch[2], 16);
@@ -165,35 +165,34 @@ export function isPrivateIP(ip: string): boolean {
 
   const expanded = ip.includes("::") ? expandIPv6(ip) : ip.toLowerCase();
 
+  // IPv6 loopback and unspecified
   if (
     ip === "::1" ||
     ip === "::" ||
-    expanded === "0:0:0:0:0:0:0:1" ||
-    expanded === "0:0:0:0:0:0:0:0"
+    expanded === "0000:0000:0000:0000:0000:0000:0000:0001" ||
+    expanded === "0000:0000:0000:0000:0000:0000:0000:0000"
   )
     return true;
+
+  // Groups are zero-padded to 4 chars, so prefix checks are exact on group boundaries.
+  // This prevents false positives on unallocated ranges (e.g., 00fc::/16 != fc00::/7).
+
+  // ULA (fc00::/7)
   if (expanded.startsWith("fc") || expanded.startsWith("fd")) return true;
-  if (
-    expanded.startsWith("fe80:") ||
-    expanded.startsWith("fe8") ||
-    expanded.startsWith("fe9") ||
-    expanded.startsWith("fea") ||
-    expanded.startsWith("feb")
-  )
-    return true;
-  if (
-    expanded.startsWith("fec0:") ||
-    expanded.startsWith("fec") ||
-    expanded.startsWith("fed") ||
-    expanded.startsWith("fee") ||
-    expanded.startsWith("fef")
-  )
-    return true;
+  // Link-local (fe80::/10) — first group fe80-febf
+  if (/^fe[89ab][0-9a-f]:/.test(expanded)) return true;
+  // Deprecated site-local (fec0::/10) — first group fec0-feff
+  if (/^fe[cdef][0-9a-f]:/.test(expanded)) return true;
+  // Multicast (ff00::/8)
   if (expanded.startsWith("ff")) return true;
-  if (expanded.startsWith("64:ff9b:")) return true;
+  // NAT64 (64:ff9b::/96)
+  if (expanded.startsWith("0064:ff9b:")) return true;
+  // 6to4 (2002::/16)
   if (expanded.startsWith("2002:")) return true;
-  if (expanded.startsWith("2001:db8:")) return true;
-  if (expanded.startsWith("2001:0:")) return true;
+  // Documentation (2001:db8::/32)
+  if (expanded.startsWith("2001:0db8:")) return true;
+  // Teredo (2001:0000::/32)
+  if (expanded.startsWith("2001:0000:")) return true;
 
   return false;
 }
