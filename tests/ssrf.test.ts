@@ -80,7 +80,12 @@ describe("isPrivateIP", () => {
     ["198.51.100.1", "TEST-NET-2"],
     ["203.0.113.1", "TEST-NET-3"],
     ["198.18.0.1", "benchmarking"],
+    ["224.0.0.1", "multicast"],
+    ["239.255.255.255", "multicast end"],
     ["240.0.0.1", "reserved class E"],
+    ["250.0.0.1", "reserved class E mid-range"],
+    ["254.0.0.1", "reserved class E near-end"],
+    ["255.255.255.255", "broadcast"],
   ])("returns true for %s (%s)", (ip) => {
     expect(isPrivateIP(ip)).toBe(true);
   });

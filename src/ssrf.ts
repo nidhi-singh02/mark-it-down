@@ -156,7 +156,10 @@ export function isPrivateIP(ip: string): boolean {
   if (ip.startsWith("198.51.100.")) return true;
   if (ip.startsWith("203.0.113.")) return true;
   if (/^198\.(18|19)\./.test(ip)) return true;
-  if (/^24[0-9]\./.test(ip) || ip.startsWith("255.")) return true;
+
+  // Multicast (224-239) and Class E reserved (240-255) — covers the full range
+  const firstOctet = parseInt(ip.split(".")[0], 10);
+  if (firstOctet >= 224) return true;
 
   const expanded = ip.includes("::") ? expandIPv6(ip) : ip.toLowerCase();
 
