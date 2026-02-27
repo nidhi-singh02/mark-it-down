@@ -66,6 +66,7 @@
     "@types/node": "^22.0.0",
     "@types/turndown": "^5.0.5",
     "eslint": "^10.0.2",
+    "js-tiktoken": "^1.0.21",
     "prettier": "^3.8.1",
     "tsup": "^8.5.0",
     "typescript": "^5.7.0",
