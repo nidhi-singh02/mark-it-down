@@ -64,7 +64,9 @@ function expandIPv6(ip: string): string {
  * @returns The normalized IPv4 or expanded IPv6 string, or `null` if not an IP.
  */
 export function normalizeIP(hostname: string): string | null {
-  const bare = hostname.replace(/^\[|\]$/g, "");
+  // Strip brackets and IPv6 zone IDs (%eth0, %en0, %12) — zone IDs cause
+  // isIP() to return 0, which would bypass IP recognition entirely.
+  const bare = hostname.replace(/^\[|\]$/g, "").replace(/%.*$/, "");
 
   if (isIP(bare) === 4) return bare;
 

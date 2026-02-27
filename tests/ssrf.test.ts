@@ -49,6 +49,15 @@ describe("normalizeIP", () => {
     expect(normalizeIP("64:ff9b::0a00:0001")).toBe("10.0.0.1");
   });
 
+  it("strips IPv6 zone IDs before normalization", () => {
+    // Linux-style zone ID
+    expect(normalizeIP("fe80::1%eth0")).toBe("fe80:0:0:0:0:0:0:1");
+    // macOS-style zone ID
+    expect(normalizeIP("[fe80::1%en0]")).toBe("fe80:0:0:0:0:0:0:1");
+    // Windows-style numeric zone ID
+    expect(normalizeIP("fe80::1%12")).toBe("fe80:0:0:0:0:0:0:1");
+  });
+
   it("returns null for non-IP hostnames", () => {
     expect(normalizeIP("example.com")).toBeNull();
     expect(normalizeIP("localhost")).toBeNull();
