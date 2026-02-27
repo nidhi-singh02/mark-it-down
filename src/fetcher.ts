@@ -192,11 +192,18 @@ function pinnedRequest(url: string, resolvedIP: string, timeout: number): Promis
     const isHttps = parsed.protocol === "https:";
     const requestFn = isHttps ? httpsRequest : httpRequest;
 
+    // Hard total-request deadline — prevents slow-drip attacks where a
+    // malicious server sends 1 byte per (idle_timeout - 1)ms to keep
+    // resetting the socket idle timer indefinitely.
+    const abortController = new AbortController();
+    const totalTimer = setTimeout(() => abortController.abort(), timeout);
+
     const req = requestFn(
       url,
       {
         method: "GET",
         timeout,
+        signal: abortController.signal,
         lookup: createPinnedLookup(resolvedIP),
         headers: {
           "User-Agent":
@@ -212,6 +219,7 @@ function pinnedRequest(url: string, resolvedIP: string, timeout: number): Promis
         res.on("data", (chunk: Buffer) => {
           totalBytes += chunk.length;
           if (totalBytes > MAX_RESPONSE_SIZE) {
+            clearTimeout(totalTimer);
             req.destroy();
             reject(
               new ContentError(
@@ -224,6 +232,7 @@ function pinnedRequest(url: string, resolvedIP: string, timeout: number): Promis
         });
 
         res.on("end", () => {
+          clearTimeout(totalTimer);
           const bodyBuffer = Buffer.concat(chunks);
           resolve({
             status: res.statusCode || 0,
@@ -234,17 +243,26 @@ function pinnedRequest(url: string, resolvedIP: string, timeout: number): Promis
           });
         });
 
-        res.on("error", reject);
+        res.on("error", (err) => {
+          clearTimeout(totalTimer);
+          reject(err);
+        });
       }
     );
 
     req.on("timeout", () => {
+      clearTimeout(totalTimer);
       req.destroy();
       reject(new NetworkError("Request timed out."));
     });
 
     req.on("error", (err: Error) => {
-      reject(new NetworkError(`Request failed: ${err.message}`, undefined, { cause: err }));
+      clearTimeout(totalTimer);
+      if (abortController.signal.aborted) {
+        reject(new NetworkError("Request timed out (total deadline exceeded)."));
+      } else {
+        reject(new NetworkError(`Request failed: ${err.message}`, undefined, { cause: err }));
+      }
     });
 
     req.end();
