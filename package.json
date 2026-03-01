@@ -1,6 +1,6 @@
 {
   "name": "web-to-markdown",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Convert any web page to clean Markdown. Built for developers and LLM pipelines.",
   "author": "Nidhi Singh",
   "repository": {
